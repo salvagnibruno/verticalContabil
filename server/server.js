@@ -221,9 +221,14 @@ app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', port: PORT, cacheSize: Object.keys(cache).length });
 });
 
-app.listen(PORT, () => {
-    console.log(`\n✅ Servidor Delta PAD rodando em http://localhost:${PORT}`);
-    console.log(`📊 Dashboard disponível em http://localhost:${PORT}/index_dashboard.html`);
-    console.log(`🔍 API disponível em http://localhost:${PORT}/api/pad-status?orgao=88023&ano=2026&mes=1`);
-    console.log(`\nPressione Ctrl+C para parar.\n`);
-});
+// Localmente: sobe o servidor normalmente. No Vercel: exporta o app sem escutar porta.
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`\n✅ Servidor Delta PAD rodando em http://localhost:${PORT}`);
+        console.log(`📊 Dashboard disponível em http://localhost:${PORT}/index_dashboard.html`);
+        console.log(`🔍 API disponível em http://localhost:${PORT}/api/pad-status?orgao=88023&ano=2026&mes=1`);
+        console.log(`\nPressione Ctrl+C para parar.\n`);
+    });
+}
+
+module.exports = app;

@@ -695,14 +695,11 @@ function seededHash(str) {
     return Math.abs(hash) / 2147483647;
 }
 
-// URL dinâmica: GitHub Pages aponta para o backend no Render; local usa localhost
+// URL dinâmica: Vercel e acesso local usam o mesmo origin; arquivo local usa localhost
 const SERVER_URL = (() => {
     const origin = window.location.origin;
     if (!origin || origin === 'null' || origin.startsWith('file')) {
         return 'http://localhost:3131';
-    }
-    if (origin.includes('github.io') || origin.includes('salvagnibruno')) {
-        return 'https://delta-pad-server.onrender.com';
     }
     return origin;
 })();
