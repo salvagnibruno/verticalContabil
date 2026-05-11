@@ -15,9 +15,8 @@ const PORT = process.env.PORT || 3131;
 
 app.use(cors());
 
-// Prioridade Máxima: servir o Portal do Colaborador no root (/)
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../index_colaborador.html'));
+    res.sendFile(path.join(__dirname, '../index_dashboard.html'));
 });
 
 app.use(express.static(path.join(__dirname, '..')));

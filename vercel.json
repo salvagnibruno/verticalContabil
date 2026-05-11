@@ -1,9 +1,22 @@
 {
   "version": 2,
   "builds": [
-    { "src": "server/server.js", "use": "@vercel/node" }
+    {
+      "src": "server/server.js",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "index_dashboard.html",
+          "dashboard_style.css",
+          "dashboard_app.js",
+          "logo_delta.png",
+          "media_logo.png",
+          "team_photos/**"
+        ]
+      }
+    }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "/server/server.js" }
+    { "src": "/(.*)", "dest": "/server/server.js" }
   ]
 }
