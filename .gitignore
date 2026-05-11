@@ -1,0 +1,5 @@
+node_modules/
+server/node_modules/
+server/__pycache__/
+server/debug*.js
+server/pad_*.html
