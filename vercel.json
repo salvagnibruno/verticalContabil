@@ -6,7 +6,7 @@
       "use": "@vercel/node",
       "config": {
         "includeFiles": [
-          "index_dashboard.html",
+          "index.html",
           "dashboard_style.css",
           "dashboard_app.js",
           "logo_delta.png",
