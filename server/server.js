@@ -16,7 +16,7 @@ const PORT = process.env.PORT || 3131;
 app.use(cors());
 
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../index_dashboard.html'));
+    res.sendFile(path.join(__dirname, '../index.html'));
 });
 
 app.use(express.static(path.join(__dirname, '..')));
@@ -224,7 +224,7 @@ app.get('/api/health', (req, res) => {
 if (!process.env.VERCEL) {
     app.listen(PORT, () => {
         console.log(`\n✅ Servidor Delta PAD rodando em http://localhost:${PORT}`);
-        console.log(`📊 Dashboard disponível em http://localhost:${PORT}/index_dashboard.html`);
+        console.log(`📊 Dashboard disponível em http://localhost:${PORT}/index.html`);
         console.log(`🔍 API disponível em http://localhost:${PORT}/api/pad-status?orgao=88023&ano=2026&mes=1`);
         console.log(`\nPressione Ctrl+C para parar.\n`);
     });
