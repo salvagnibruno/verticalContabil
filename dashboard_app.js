@@ -1072,12 +1072,6 @@ function refreshSimulated() {
 function getSimulatedStatus(code, deadline, today) {
     // Current rule: if no start date, internal default 01/01/1950 (already active)
     
-    // February 2026: exact known data
-    if (state.selectedYear === 2026 && state.selectedMonth === 1) {
-        if (code === '45700') return 'pending'; // PM Constantina
-        if (code === '41201') return 'late';    // CM Arroio do Tigre
-        return 'on-time';
-    }
     // Meses Futuros (prazo não vencido): Mostrar 'pendente' apenas de ABRIL em diante
     if (deadline > today && state.selectedMonth > 2) return 'pending';
     // Past months: deterministic hash
