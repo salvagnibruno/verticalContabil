@@ -2422,7 +2422,7 @@ function renderClientsMgmtTable() {
         const row = document.createElement('tr');
         row.innerHTML = `
             
-            <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
+            <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="code" style="width:60px;"></td>
             <td><input type="text" value="${c.type}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
             <td><input type="text" value="${c.name}" data-idx="${idx}" data-field="name"></td>
             <td><input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart"></td>
