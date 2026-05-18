@@ -220,6 +220,52 @@ async function apiChangePassword(email, newPassword, currentPassword) {
     return r.json();
 }
 
+// ── Entregas Legais: sincroniza APENAS os 3 campos (entregasLegais + datas) via servidor ──
+// Não toca em ibge, contractStart/End, nome, tipo — todos permanecem intactos.
+async function fetchLegaisFromServer() {
+    try {
+        const r = await fetch(`${getAuthApiBase()}/api/clients/legais`, { cache: 'no-store' });
+        if (!r.ok) return null;
+        const data = await r.json();
+        return (data.legais && typeof data.legais === 'object') ? data.legais : null;
+    } catch (e) { return null; }
+}
+
+async function pushLegaisToServer(clients) {
+    const legais = {};
+    clients.forEach(c => {
+        if (!c || !c.code) return;
+        legais[c.code] = {
+            entregasLegais: !!c.entregasLegais,
+            entregasLegaisStart: c.entregasLegaisStart || '',
+            entregasLegaisEnd: c.entregasLegaisEnd || ''
+        };
+    });
+    try {
+        const r = await fetch(`${getAuthApiBase()}/api/clients/legais`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ legais })
+        });
+        const data = await r.json();
+        return !!data.ok;
+    } catch (e) { return false; }
+}
+
+// Aplica o mapa do servidor SEM substituir objetos — só atualiza os 3 campos
+function applyLegaisFromServer(legaisMap) {
+    if (!legaisMap || typeof legaisMap !== 'object') return;
+    state.clients.forEach(c => {
+        if (!c || !c.code) return;
+        const data = legaisMap[c.code];
+        if (data) {
+            c.entregasLegais = !!data.entregasLegais;
+            c.entregasLegaisStart = data.entregasLegaisStart || '';
+            c.entregasLegaisEnd = data.entregasLegaisEnd || '';
+        }
+    });
+}
+
 function hashPassword(pwd) { return btoa(pwd); }
 
 // authLogin agora consulta o servidor — fonte da verdade compartilhada entre browsers
@@ -488,6 +534,17 @@ const el = {
 async function init() {
     // ── Sincronizar usuários do servidor ─────────────────────
     await fetchUsersFromServer();
+
+    // ── Sincronizar APENAS as marcações de Entregas Legais via servidor ──
+    // Não substitui state.clients — apenas atualiza os 3 campos. ibge,
+    // contractStart/End, nome e tipo continuam vindo do CLIENTS_RAW.
+    try {
+        const legaisMap = await fetchLegaisFromServer();
+        if (legaisMap) {
+            applyLegaisFromServer(legaisMap);
+            localStorage.setItem('delta_v2_clients', JSON.stringify(state.clients));
+        }
+    } catch (e) { /* sem KV / sem servidor: mantém localStorage */ }
 
     // ── Migração one-shot: enviar usuários antigos do localStorage para o servidor ──
     // (executa apenas uma vez por browser, para não perder contas criadas antes do servidor)
@@ -3272,6 +3329,10 @@ function saveClientsChanges() {
     });
 
     localStorage.setItem('delta_v2_clients', JSON.stringify(state.clients));
+    // Replica APENAS as marcações de Entregas Legais para o servidor (KV)
+    // para que outros colaboradores vejam as mesmas marcações. Não envia
+    // ibge/contractDates/etc — só os 3 campos. Fire-and-forget (não bloqueia o alert).
+    pushLegaisToServer(state.clients);
     alert('✅ Clientes salvos com sucesso!');
     renderClientsMgmtTable(); // re-renderiza para atualizar data-original dos códigos
     refreshModuleData();

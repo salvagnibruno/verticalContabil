@@ -231,6 +231,40 @@ app.post('/api/auth/change-password', async (req, res) => {
 });
 
 // POST /api/auth/sync → migração one-shot do localStorage do cliente
+// =============================================================
+// ENTREGAS LEGAIS — flags compartilhadas entre browsers via KV
+// Armazena APENAS { code → { entregasLegais, entregasLegaisStart, entregasLegaisEnd } }
+// NÃO afeta ibge, contractStart/End, nome, tipo etc. — esses continuam
+// vindo do CLIENTS_RAW/localStorage, intactos.
+// =============================================================
+
+// GET /api/clients/legais → mapa { code → { entregasLegais, entregasLegaisStart, entregasLegaisEnd } }
+app.get('/api/clients/legais', async (req, res) => {
+    if (!KV_ENABLED) return res.json({ legais: null });
+    const legais = await kvGet('delta:clients:legais');
+    res.json({ legais: legais && typeof legais === 'object' ? legais : null });
+});
+
+// POST /api/clients/legais → admin envia o mapa
+// Body: { legais: { "73500": { entregasLegais, entregasLegaisStart, entregasLegaisEnd }, ... } }
+app.post('/api/clients/legais', async (req, res) => {
+    const { legais } = req.body || {};
+    if (!legais || typeof legais !== 'object') return res.status(400).json({ ok: false, error: 'legais deve ser objeto.' });
+    if (!KV_ENABLED) return res.status(500).json({ ok: false, error: 'KV não configurado.' });
+    // Sanitiza: só guarda os 3 campos relevantes por código
+    const clean = {};
+    for (const [code, data] of Object.entries(legais)) {
+        if (!data) continue;
+        clean[code] = {
+            entregasLegais: !!data.entregasLegais,
+            entregasLegaisStart: data.entregasLegaisStart || '',
+            entregasLegaisEnd: data.entregasLegaisEnd || ''
+        };
+    }
+    const ok = await kvSet('delta:clients:legais', clean);
+    res.json({ ok, count: Object.keys(clean).length });
+});
+
 app.post('/api/auth/sync', async (req, res) => {
     const { users: clientUsers } = req.body || {};
     if (!clientUsers || typeof clientUsers !== 'object') return res.status(400).json({ ok: false });

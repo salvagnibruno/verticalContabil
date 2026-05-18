@@ -689,6 +689,9 @@ input[type="text"], input[type="date"], input[type="time"], select {
 .clients-table th { background: #f8f9fc; font-weight: 700; color: var(--primary-blue); }
 .clients-table input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 0.8rem; }
 .clients-table input:focus { border-color: var(--secondary-blue); outline: none; box-shadow: 0 0 5px rgba(0, 159, 227, 0.2); }
+/* Coluna Nome Cliente recebe mais espaço — demais ajustam-se */
+.clients-table th:nth-child(3), .clients-table td:nth-child(3) { min-width: 260px; }
+.clients-table th:nth-child(3) input, .clients-table td:nth-child(3) input { min-width: 240px; }
 .btn-group-actions { display: flex; gap: 10px; margin-top: 20px; }
 .btn-save { background: var(--success); color: #fff; font-weight: 700; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
 .btn-cancel { background: #6c757d; color: #fff; font-weight: 700; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
