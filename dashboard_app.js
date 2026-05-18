@@ -680,27 +680,32 @@ function returnToHome() {
 function initUserSession() {
     const dropdown = document.getElementById('profile-dropdown-menu');
     if (!dropdown) return;
-    
+
     dropdown.innerHTML = '';
-    
-    state.team.forEach(m => {
-        // Restriction: if collaborator page (url index_colaborador.html), hide supervisors
-        if (window.IS_COLABORADOR && m.isSupervisor) return;
-        
+
+    // Com login ativo, o dropdown exibe apenas o próprio usuário logado
+    // (não é mais permitido trocar de identidade via interface)
+    const loggedEmail = state.loggedInUser ? state.loggedInUser.email : null;
+    const membersToShow = loggedEmail
+        ? state.team.filter(m => m.name === state.currentUser)
+        : state.team; // fallback sem login (não deve acontecer)
+
+    membersToShow.forEach(m => {
         const item = document.createElement('div');
-        item.className = `profile-item ${m.name === state.currentUser ? 'active' : ''}`;
-        
+        item.className = `profile-item active`;
+
         const firstName = m.name.split(' ')[0];
         const initials = m.name.split(' ').map(n => n[0]).join('').substring(0, 2);
-        
+        const roleLabel = state.isSupervisor ? 'Admin' : 'Colaborador';
+
         item.innerHTML = `
-            <div class="member-chip" style="width:25px; height:25px; font-size:0.6rem; flex-shrink: 0; display: flex; align-items: center; justify-content: center;">${initials}</div>
-            <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${firstName}</span>
+            <div class="member-chip" style="width:25px; height:25px; font-size:0.6rem; flex-shrink:0; display:flex; align-items:center; justify-content:center;">${initials}</div>
+            <div style="display:flex; flex-direction:column; overflow:hidden;">
+                <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600;">${firstName}</span>
+                <span style="font-size:0.68rem; color:var(--text-muted);">${roleLabel}</span>
+            </div>
         `;
-        item.onclick = () => {
-            switchUser(m.name);
-            toggleProfileMenu(false);
-        };
+        // Sem onclick — troca de identidade não é permitida após login
         dropdown.appendChild(item);
     });
 
@@ -727,13 +732,9 @@ window.addEventListener('click', (e) => {
 });
 
 function switchUser(name) {
-    if (window.IS_COLABORADOR && name !== state.currentUser) {
-        if (!confirm(`Deseja realmente alternar o perfil para '${name}'?`)) {
-            // Reset selector to previous
-            const sel = document.getElementById('header-user-selector');
-            if (sel) sel.value = state.currentUser;
-            return;
-        }
+    // Com sistema de login ativo, não é permitido trocar de identidade
+    if (state.loggedInUser && name !== state.currentUser) {
+        return; // silencioso — não há mais seletor livre de usuário
     }
 
     state.currentUser = name;
@@ -763,9 +764,17 @@ function syncUserIdentity() {
     }
 
     if (photoDisplay && member) {
-        const firstName = state.currentUser.split(' ')[0];
-        const initials = state.currentUser.split(' ').map(n => n[0]).join('').substring(0, 2);
-        photoDisplay.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(state.currentUser)}&background=${state.isSupervisor ? '005eb8' : 'fff'}&color=${state.isSupervisor ? 'fff' : '005eb8'}`;
+        if (member.photoData) {
+            // Foto enviada pelo admin (base64)
+            photoDisplay.src = member.photoData;
+        } else {
+            // Fallback: arquivo estático ou UI Avatars
+            const firstName = state.currentUser.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/gi, '');
+            const staticUrl = `team_photos/${firstName}.jpg`;
+            const fallback  = `https://ui-avatars.com/api/?name=${encodeURIComponent(state.currentUser)}&background=${state.isSupervisor ? '005eb8' : 'fff'}&color=${state.isSupervisor ? 'fff' : '005eb8'}`;
+            photoDisplay.onerror = () => { photoDisplay.onerror = null; photoDisplay.src = fallback; };
+            photoDisplay.src = staticUrl;
+        }
     }
     
     // Toggle supervisor-only elements
@@ -808,10 +817,32 @@ function renderMembersListView() {
                 <button class="btn-primary supervisor-only" onclick="document.getElementById('modal-member-new').classList.remove('hidden')">＋ Novo Membro</button>
             </div>
             <div class="members-list-vertical" style="display:flex; flex-direction:column; gap:15px; margin-top:20px;">
-                ${state.team.map((m, idx) => `
+                ${state.team.map((m, idx) => {
+                    const firstName = m.name.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/gi, '');
+                    const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=005eb8&color=fff`;
+                    const staticUrl  = `team_photos/${firstName}.jpg`;
+                    const photoSrc   = m.photoData || staticUrl;
+                    return `
                     <div class="member-row card" id="member-row-${idx}" style="display:flex; align-items:center; justify-content:space-between; padding:15px; background:var(--bg-light);">
                         <div style="display:flex; gap:20px; flex-grow:1; align-items:center;">
-                            <img src="https://ui-avatars.com/api/?name=${m.name}&background=random" style="width:40px; height:40px; border-radius:50%;">
+
+                            <!-- Foto com upload (admin) -->
+                            <div style="position:relative; flex-shrink:0;">
+                                <img id="member-photo-${idx}"
+                                    src="${photoSrc}"
+                                    onerror="this.onerror=null; this.src='${fallbackUrl}';"
+                                    alt="${m.name}"
+                                    style="width:60px; height:60px; border-radius:50%; object-fit:cover; border:2px solid var(--primary-light);">
+                                ${state.isSupervisor ? `
+                                    <label for="photo-upload-${idx}" title="Trocar foto"
+                                        style="position:absolute; bottom:0; right:0; background:var(--primary); color:#fff; border-radius:50%; width:20px; height:20px; display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:0.7rem; box-shadow:0 1px 4px rgba(0,0,0,0.3);">📷
+                                    </label>
+                                    <input type="file" id="photo-upload-${idx}" accept="image/*"
+                                        style="display:none;"
+                                        onchange="uploadMemberPhoto(${idx}, this.files[0])">
+                                ` : ''}
+                            </div>
+
                             <div style="flex-grow:1; display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
                                 <div class="form-group" style="margin:0;">
                                     <label style="font-size:0.7rem; color:var(--text-muted);">Nome</label>
@@ -846,7 +877,7 @@ function renderMembersListView() {
                             <button class="btn-remove-member" onclick="removeMemberWithFade(${idx})" style="position:static; margin-left:20px; font-size:1.2rem;" title="Remover Membro">🗑️</button>
                         ` : ''}
                     </div>
-                `).join('')}
+                `}).join('')}
             </div>
         </div>
     `;
@@ -987,6 +1018,32 @@ window.setMemberInitialPassword = function(idx) {
     if (pwdInput) pwdInput.value = '';
     const acao = jaExistia ? 'atualizado' : 'criado';
     alert(`✅ Acesso ${acao} para ${member.name} (${email}).\nEle deverá trocar a senha no próximo login.`);
+};
+
+/**
+ * Upload de foto de membro da equipe (admin only).
+ * Lê o arquivo como base64 e armazena em state.team[idx].photoData.
+ */
+window.uploadMemberPhoto = function(idx, file) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('Selecione um arquivo de imagem (JPG, PNG, etc.).'); return; }
+    if (file.size > 5 * 1024 * 1024) { alert('A imagem deve ter no máximo 5 MB.'); return; }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const base64 = e.target.result;
+        state.team[idx].photoData = base64;
+        localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
+
+        // Atualiza a foto na tela sem re-renderizar todo o formulário
+        const imgEl = document.getElementById(`member-photo-${idx}`);
+        if (imgEl) imgEl.src = base64;
+
+        // Atualiza os cards da equipe e o header se for o usuário logado
+        renderTeam();
+        if (state.team[idx].name === state.currentUser) syncUserIdentity();
+    };
+    reader.readAsDataURL(file);
 };
 
 /**
@@ -2141,8 +2198,10 @@ function renderTeam() {
 
         const firstName = m.name.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/gi, '');
         const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=f0f4f8&color=005eb8`;
-        const avatarUrl = `team_photos/${firstName}.jpg`;
-        
+        const staticUrl  = `team_photos/${firstName}.jpg`;
+        // Prioridade: foto enviada pelo admin (base64) > arquivo estático > UI Avatars
+        const photoSrc   = m.photoData || staticUrl;
+
         let deleteBtnHTML = '';
         if (state.isSupervisor && m.name !== state.currentUser) {
             deleteBtnHTML = `<button class="delete-chip-btn" onclick="deleteMember('${m.name}')" style="position: absolute; top: -5px; right: -5px; background: var(--danger); border: none; color: white; border-radius: 50%; width: 20px; height: 20px; font-size: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 2px 4px rgba(0,0,0,0.2);">X</button>`;
@@ -2150,7 +2209,7 @@ function renderTeam() {
 
         card.innerHTML = `
             ${deleteBtnHTML}
-            <img src="${avatarUrl}" onerror="this.onerror=null; this.src='${fallbackUrl}';" alt="${m.name}" style="width:40px; height:40px; border-radius:50%; margin-bottom: 5px; object-fit:cover;">
+            <img src="${photoSrc}" onerror="this.onerror=null; this.src='${fallbackUrl}';" alt="${m.name}" style="width:40px; height:40px; border-radius:50%; margin-bottom: 5px; object-fit:cover;">
             <div class="member-name">${m.name.split(' ')[0]}</div>
         `;
         list.appendChild(card);
@@ -2809,12 +2868,12 @@ function renderClientsMgmtTable() {
             <td><input type="text" value="${c.type}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
             <td><input type="text" value="${c.name}" data-idx="${idx}" data-field="name"></td>
             <td style="text-align:center;">
-                <input type="checkbox" data-idx="${idx}" data-field="entregasLegais" ${hasLegal ? 'checked' : ''} onchange="toggleLegaisRow(${idx}, this.checked)">
+                <input type="checkbox" data-idx="${idx}" data-field="entregasLegais" ${hasLegal ? 'checked' : ''}>
             </td>
-            <td id="legais-start-${idx}" style="${hasLegal ? '' : 'opacity:0.3; pointer-events:none;'}">
+            <td>
                 <input type="date" value="${c.entregasLegaisStart || ''}" data-idx="${idx}" data-field="entregasLegaisStart">
             </td>
-            <td id="legais-end-${idx}" style="${hasLegal ? '' : 'opacity:0.3; pointer-events:none;'}">
+            <td>
                 <input type="date" value="${c.entregasLegaisEnd || ''}" data-idx="${idx}" data-field="entregasLegaisEnd">
             </td>
             <td><input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart"></td>
@@ -2824,12 +2883,7 @@ function renderClientsMgmtTable() {
     });
 }
 
-window.toggleLegaisRow = function(idx, checked) {
-    const startCell = document.getElementById(`legais-start-${idx}`);
-    const endCell   = document.getElementById(`legais-end-${idx}`);
-    if (startCell) startCell.style.cssText = checked ? '' : 'opacity:0.3; pointer-events:none;';
-    if (endCell)   endCell.style.cssText   = checked ? '' : 'opacity:0.3; pointer-events:none;';
-};
+// toggleLegaisRow removida — todos os campos de data são sempre editáveis
 
 function saveClientsChanges() {
     const inputs = document.querySelectorAll('#clients-mgmt-table input');
