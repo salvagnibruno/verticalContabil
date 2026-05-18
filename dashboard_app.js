@@ -2267,21 +2267,37 @@ function renderTeamManagement() {
         return;
     }
 
+    const users = getUsers();
+
     state.team.forEach(m => {
         const row = document.createElement('div');
         row.className = 'member-row';
         row.id = `member-row-${m.name.replace(/\s/g, '-')}`;
 
-        const initials = m.name.split(' ').map(n => n[0]).join('').substring(0, 2);
         const firstName = m.name.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/gi, '');
         const fallbackUrl = `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=f0f4f8&color=005eb8`;
-        const avatarUrl = `team_photos/${firstName}.jpg`;
+        const staticUrl  = `team_photos/${firstName}.jpg`;
+        // Prioridade: foto enviada (base64) > arquivo estático > UI Avatars
+        const photoSrc   = m.photoData || staticUrl;
+
+        const email     = (m.email || '').toLowerCase().trim();
+        const userAcc   = email ? users[email] : null;
+        const mustChg   = userAcc && userAcc.mustChangePassword;
+
+        const roleBadge = m.isSupervisor
+            ? '<span style="font-size:0.7rem; background:#e8f0fe; color:#1967d2; padding:2px 6px; border-radius:10px; margin-left:5px;">Admin</span>'
+            : '<span style="font-size:0.7rem; background:#fff3e0; color:#f57c00; padding:2px 6px; border-radius:10px; margin-left:5px;">Colaborador</span>';
+
+        const emailLine = email
+            ? `<p style="margin-bottom:2px; color:#005eb8;">✉️ ${email}${mustChg ? ' <span style="background:#fff3cd; color:#856404; padding:1px 6px; border-radius:8px; font-size:0.7rem; margin-left:4px;">⚠ Trocará senha no 1º login</span>' : userAcc ? ' <span style="color:#28a745; font-size:0.7rem;">✓ Acesso ativo</span>' : ' <span style="color:#999; font-size:0.7rem;">(sem senha cadastrada)</span>'}</p>`
+            : `<p style="margin-bottom:2px; color:#999; font-style:italic;">✉️ (sem e-mail cadastrado)</p>`;
 
         row.innerHTML = `
             <div class="member-info-group" style="cursor: pointer;" onclick="openMemberModal('${m.name}')" title="Clique para editar">
-                <img src="${avatarUrl}" class="member-photo-circle" alt="${m.name}" onerror="this.onerror=null; this.src='${fallbackUrl}';">
+                <img src="${photoSrc}" class="member-photo-circle" alt="${m.name}" onerror="this.onerror=null; this.src='${fallbackUrl}';">
                 <div class="member-details-text">
-                    <h4>${m.name} ${m.isSupervisor ? '<span style="font-size:0.7rem; background:#e8f0fe; color:#1967d2; padding:2px 6px; border-radius:10px; margin-left:5px;">Supervisor</span>' : ''}</h4>
+                    <h4>${m.name} ${roleBadge}</h4>
+                    ${emailLine}
                     <p style="margin-bottom:2px;">📅 Admissão: ${m.admissionDate || '--/--/----'} | Equipe: Delta</p>
                     <p style="color:#666; font-size:0.75rem;">🎂 Nascimento: ${m.birthday || '--/--'} / ${m.year || '----'}</p>
                 </div>
@@ -2295,19 +2311,44 @@ function renderTeamManagement() {
     });
 }
 
+// Foto temporária do modal (base64) - aplicada ao gravar
+let _pendingMemberPhoto = null;
+
+window.handleMemberPhotoUpload = function(file) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { alert('Selecione um arquivo de imagem (JPG, PNG, etc.).'); return; }
+    if (file.size > 5 * 1024 * 1024) { alert('A imagem deve ter no máximo 5 MB.'); return; }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        _pendingMemberPhoto = e.target.result;
+        const img = document.getElementById('photo-preview-img');
+        if (img) img.src = _pendingMemberPhoto;
+    };
+    reader.readAsDataURL(file);
+};
+
 window.openMemberModal = (memberName = null) => {
     const modal = document.getElementById('modal-member-edit');
     const title = document.getElementById('member-modal-title');
     const form = document.getElementById('form-member-edit');
-    
+
     form.reset();
+    _pendingMemberPhoto = null; // reset upload temporário
     document.getElementById('edit-member-id').value = memberName || '';
-    
+
+    const pwdStatus = document.getElementById('member-pwd-status');
+    if (pwdStatus) { pwdStatus.style.display = 'none'; pwdStatus.innerHTML = ''; }
+    document.getElementById('member-initial-pwd').value = '';
+    document.getElementById('member-must-change-pwd').checked = true;
+
     if (memberName) {
         const m = state.team.find(x => x.name === memberName);
         if (m) {
             title.textContent = "Editar Membro";
             document.getElementById('member-full-name').value = m.name;
+            document.getElementById('member-email').value = m.email || '';
+
             // Dates in state are usually dd/mm/aaaa, need to convert to yyyy-mm-dd for input type=date
             if (m.admissionDate && m.admissionDate.includes('/')) {
                 const parts = m.admissionDate.split('/');
@@ -2318,7 +2359,37 @@ window.openMemberModal = (memberName = null) => {
             document.getElementById('member-birthday').value = m.birthday || '';
             document.getElementById('member-year').value = m.year || '';
             document.getElementById('member-is-supervisor').checked = !!m.isSupervisor;
-            document.getElementById('photo-preview-img').src = `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=f0f4f8&color=005eb8`;
+
+            // Foto: priorizar photoData salvo > arquivo estático > avatar
+            const firstName = m.name.split(' ')[0].toLowerCase().replace(/[^a-z0-9]/gi, '');
+            const fallback = `https://ui-avatars.com/api/?name=${encodeURIComponent(m.name)}&background=f0f4f8&color=005eb8`;
+            const imgEl = document.getElementById('photo-preview-img');
+            if (m.photoData) {
+                imgEl.src = m.photoData;
+            } else {
+                imgEl.onerror = () => { imgEl.onerror = null; imgEl.src = fallback; };
+                imgEl.src = `team_photos/${firstName}.jpg`;
+            }
+
+            // Status do acesso atual
+            if (pwdStatus && m.email) {
+                const users = getUsers();
+                const u = users[(m.email || '').toLowerCase().trim()];
+                if (u) {
+                    pwdStatus.style.display = 'block';
+                    if (u.mustChangePassword) {
+                        pwdStatus.innerHTML = '⚠ <b>Acesso pendente:</b> usuário deverá trocar a senha no próximo login.';
+                        pwdStatus.style.color = '#856404';
+                    } else {
+                        pwdStatus.innerHTML = '✓ <b>Acesso ativo</b> — usuário já trocou a senha inicial.';
+                        pwdStatus.style.color = '#28a745';
+                    }
+                } else {
+                    pwdStatus.style.display = 'block';
+                    pwdStatus.innerHTML = '🔓 <b>Sem acesso:</b> defina uma senha abaixo para liberar o login.';
+                    pwdStatus.style.color = '#666';
+                }
+            }
         }
     } else {
         title.textContent = "Novo Membro da Equipe";
@@ -2335,12 +2406,16 @@ window.closeMemberModal = () => {
 // Handle Form Submit
 document.getElementById('form-member-edit')?.addEventListener('submit', (e) => {
     e.preventDefault();
-    const oldName = document.getElementById('edit-member-id').value;
-    const newName = document.getElementById('member-full-name').value;
-    const rawDate = document.getElementById('member-admission-date').value; // yyyy-mm-dd
-    const isSup = document.getElementById('member-is-supervisor').checked;
-    const bday = document.getElementById('member-birthday').value;
-    const byear = document.getElementById('member-year').value;
+    const oldName  = document.getElementById('edit-member-id').value;
+    const newName  = document.getElementById('member-full-name').value.trim();
+    const newEmail = (document.getElementById('member-email').value || '').trim().toLowerCase();
+    const rawDate  = document.getElementById('member-admission-date').value; // yyyy-mm-dd
+    const isSup    = document.getElementById('member-is-supervisor').checked;
+    const bday     = document.getElementById('member-birthday').value;
+    const byear    = document.getElementById('member-year').value;
+    const initPwd  = (document.getElementById('member-initial-pwd').value || '').trim();
+    const mustChg  = document.getElementById('member-must-change-pwd').checked;
+    const newRole  = isSup ? 'admin' : 'colaborador';
 
     let formattedDate = '';
     if (rawDate) {
@@ -2348,46 +2423,110 @@ document.getElementById('form-member-edit')?.addEventListener('submit', (e) => {
         formattedDate = `${dateParts[2]}/${dateParts[1]}/${dateParts[0]}`;
     }
 
+    let targetMember;
+    let oldEmail = '';
     if (oldName) {
         // Edit
-        const m = state.team.find(x => x.name === oldName);
-        if (m) {
-            m.name = newName;
-            m.admissionDate = formattedDate;
-            m.birthday = bday;
-            m.year = byear;
-            m.isSupervisor = isSup;
+        targetMember = state.team.find(x => x.name === oldName);
+        if (targetMember) {
+            oldEmail = (targetMember.email || '').toLowerCase().trim();
+            targetMember.name = newName;
+            targetMember.email = newEmail;
+            targetMember.admissionDate = formattedDate;
+            targetMember.birthday = bday;
+            targetMember.year = byear;
+            targetMember.isSupervisor = isSup;
+            targetMember.role = newRole;
+            if (_pendingMemberPhoto) targetMember.photoData = _pendingMemberPhoto;
         }
     } else {
         // Add
-        state.team.push({
+        targetMember = {
             name: newName,
+            email: newEmail,
             admissionDate: formattedDate,
             birthday: bday,
             year: byear,
-            isSupervisor: isSup
-        });
+            isSupervisor: isSup,
+            role: newRole
+        };
+        if (_pendingMemberPhoto) targetMember.photoData = _pendingMemberPhoto;
+        state.team.push(targetMember);
     }
 
+    // Sincronizar com delta_users (contas de login)
+    const users = getUsers();
+
+    // Se o e-mail mudou, renomear a entrada antiga
+    if (oldEmail && oldEmail !== newEmail && users[oldEmail]) {
+        if (newEmail) {
+            users[newEmail] = { ...users[oldEmail], email: newEmail, name: newName, teamMemberName: newName, role: newRole };
+        }
+        delete users[oldEmail];
+    }
+
+    // Atualizar/criar conta com base no e-mail final
+    if (newEmail) {
+        if (initPwd) {
+            // Nova senha definida: cria ou redefine
+            users[newEmail] = {
+                email: newEmail,
+                name: newName,
+                role: newRole,
+                passwordHash: hashPassword(initPwd),
+                mustChangePassword: mustChg,
+                teamMemberName: newName
+            };
+        } else if (users[newEmail]) {
+            // Sem nova senha: apenas mantém os metadados sincronizados
+            users[newEmail].name = newName;
+            users[newEmail].teamMemberName = newName;
+            users[newEmail].role = newRole;
+            // Se admin alterou a flag mustChangePassword manualmente, respeita
+            users[newEmail].mustChangePassword = mustChg ? true : users[newEmail].mustChangePassword;
+        }
+        // Sem senha definida e sem conta existente: nada a fazer (membro sem acesso)
+    }
+
+    saveUsers(users);
+
     localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
+    _pendingMemberPhoto = null;
     closeMemberModal();
     renderTeamManagement();
     renderTeam();
     initUserSession();
-    alert("Dados do membro salvos com sucesso!");
+
+    let msg = `✅ ${newName} salvo.`;
+    if (newEmail && initPwd) msg += `\n🔐 Acesso ${oldEmail && users[newEmail] ? 'atualizado' : 'criado'} para ${newEmail}.`;
+    if (newEmail && initPwd && mustChg) msg += `\nUsuário deverá trocar a senha no próximo login.`;
+    alert(msg);
 });
 
 window.deleteMember = (name) => {
-    if (!confirm(`Deseja realmente excluir ${name}?`)) return;
-    
+    if (!confirm(`Deseja realmente excluir ${name}?\n\nIsso também removerá o acesso de login deste usuário.`)) return;
+
     const row = document.getElementById(`member-row-${name.replace(/\s/g, '-')}`);
     if (row) {
         row.classList.add('fade-out-del');
     }
-    
+
     setTimeout(() => {
-        state.team = state.team.filter(m => m.name !== name);
+        // Remover do team
+        const m = state.team.find(x => x.name === name);
+        const email = m ? (m.email || '').toLowerCase().trim() : '';
+        state.team = state.team.filter(x => x.name !== name);
         localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
+
+        // Remover a conta de login associada (se existir)
+        if (email) {
+            const users = getUsers();
+            if (users[email]) {
+                delete users[email];
+                saveUsers(users);
+            }
+        }
+
         renderTeamManagement();
         renderTeam();
         initUserSession();

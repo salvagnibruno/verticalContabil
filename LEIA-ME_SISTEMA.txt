@@ -1,0 +1,268 @@
+================================================================================
+  DELTA GESTÃO PÚBLICA — DASHBOARD VERTICAL CONTÁBIL
+  Documentação do Sistema | Backup gerado em: 18/05/2026
+================================================================================
+
+VISÃO GERAL
+-----------
+Este sistema é um painel de controle (dashboard) interno desenvolvido pela
+Delta Gestão Pública para monitorar o status de entregas contábeis de seus
+clientes municipais junto ao TCE-RS (Tribunal de Contas do Estado do
+Rio Grande do Sul) e ao FNDE (Fundo Nacional de Desenvolvimento da Educação).
+
+URL de produção: https://vertical-contabil.vercel.app
+Repositório:     https://github.com/salvagnibruno/verticalContabil
+
+
+================================================================================
+MÓDULOS DISPONÍVEIS
+================================================================================
+
+1. PAD — Prestação de Contas Digital (TCE-RS)
+   Monitora o envio mensal de demonstrativos contábeis ao portal do TCE-RS.
+   Verifica, para cada cliente, se o envio do mês de referência foi realizado
+   dentro do prazo (último dia do mês + 30 dias).
+   Status possíveis: No Prazo | Atrasado | Não Enviado
+
+2. SIOPE — Sistema de Informações sobre Orçamentos Públicos em Educação (FNDE)
+   Monitora o envio bimestral ao portal do FNDE.
+
+3. MSC, SIOPS, MGS, RREO
+   Módulos adicionais para outros tipos de entregas contábeis.
+   (Atualmente em desenvolvimento / dados simulados)
+
+
+================================================================================
+ARQUITETURA TÉCNICA
+================================================================================
+
+FRONTEND (Cliente)
+------------------
+Tecnologia: HTML5 + CSS3 + JavaScript puro (sem frameworks)
+Arquivos:
+  - index.html          → Estrutura HTML do dashboard
+  - dashboard_app.js    → Toda a lógica da aplicação (~110 KB)
+  - dashboard_style.css → Estilos visuais (~24 KB)
+  - logo_delta.png      → Logotipo da empresa
+  - media_logo.png      → Logo alternativo
+  - team_photos/        → Fotos da equipe (bruno, gioliani, hugo, jade, luana, marcus)
+
+Hospedagem: Vercel (plataforma de deploy frontend/serverless)
+Região:     gru1 (São Paulo, Brasil)
+
+BACKEND (Servidor de API)
+-------------------------
+Tecnologia: Node.js + Express.js
+Arquivo:    server/server.js
+Porta:      3131
+
+Dependências:
+  - express     ^4.18.2  → Servidor HTTP
+  - node-fetch  ^2.7.0   → Requisições HTTP para o TCE-RS
+  - cors        ^2.8.5   → Política de CORS
+
+Hospedagem: Vercel (mesmo projeto, roteia tudo via server/server.js)
+Configuração de deploy: vercel.json (region: gru1, maxDuration: 60s)
+
+
+================================================================================
+COMO O SISTEMA CONSULTA O PORTAL DO TCE-RS
+================================================================================
+
+MECANISMO DE CONSULTA
+---------------------
+A cada 10 minutos, o dashboard executa uma atualização automática via
+JavaScript (setInterval com intervalo de 600.000 ms = 10 minutos), chamando
+a função refreshModuleData() que dispara a consulta ao servidor.
+
+O servidor (server.js) realiza uma requisição HTTP GET ao portal público do
+TCE-RS, sem necessidade de autenticação (portal público):
+
+  URL consultada:
+  https://portal.tce.rs.gov.br/pcdi2/relatorios-recibos-envio.action
+    ?cdOrgao={CODIGO_ORGAO}&ano={ANO}
+
+O servidor faz o parse do HTML retornado, localiza a tabela de recibos de
+envio e verifica se existe uma linha correspondente ao mês consultado.
+
+LÓGICA DE CLASSIFICAÇÃO (parsePadStatus)
+----------------------------------------
+  - Linha do mês NÃO existe no HTML   → Status: "Não Enviado" (pending)
+  - Linha existe + sem data conclusão → Status: "No Prazo" (on-time / processando)
+  - Linha existe + data <= prazo      → Status: "No Prazo" (on-time)
+  - Linha existe + data > prazo       → Status: "Atrasado" (late)
+
+  Prazo = último dia do mês de referência + 30 dias corridos
+
+PLATAFORMA QUE REALIZA AS CONSULTAS
+------------------------------------
+O sistema possui DOIS modos de operação para realizar as consultas ao TCE-RS:
+
+  MODO 1 — SERVIDOR LOCAL (Preferencial)
+  Plataforma: Computador Windows da equipe Delta
+  Como ativar: executar "Iniciar Dashboard.bat" na raiz do projeto
+  Porta: localhost:3131
+  Vantagem: usa o IP real do escritório, que não é bloqueado pelo TCE-RS.
+  O dashboard detecta automaticamente o servidor local ao carregar
+  (tenta conectar em http://localhost:3131/api/health).
+
+  MODO 2 — SERVIDOR VERCEL (Fallback automático)
+  Plataforma: Vercel (cloud serverless, região São Paulo / gru1)
+  URL: https://vertical-contabil.vercel.app/api/...
+  Limitação: os IPs dos servidores Vercel podem ser bloqueados pelo
+  TCE-RS (retorna HTTP 403). Neste caso, o modo simulado é ativado
+  automaticamente como contingência.
+
+  MODO 3 — SIMULAÇÃO (Contingência)
+  Quando nenhum servidor está disponível, o dashboard exibe dados
+  simulados com base em dados reais conhecidos (Jan/Fev/Mar 2026)
+  e hash determinístico para meses sem dados reais.
+
+DETALHAMENTO DO SERVIDOR LOCAL
+--------------------------------
+  Arquivo: server/server.js
+  Como iniciar: duplo-clique em "Iniciar Dashboard.bat"
+    (ou: cd server && node server.js)
+
+  Endpoints disponíveis:
+    GET  /api/pad-status?orgao={cod}&ano={ano}&mes={mes}
+         → Status de um único órgão
+
+    POST /api/pad-status-batch
+         Body: { orgaos: [...], ano: "2026", mes: 1 }
+         → Status de múltiplos órgãos em paralelo (máx 40 simultâneos)
+
+    GET  /api/siope-status-batch
+         → Status SIOPE via FNDE
+
+    GET  /api/health
+         → Health check do servidor
+
+    GET  /api/debug
+         → Diagnóstico: IP externo + teste de conectividade com TCE-RS
+
+  Cache: resultados ficam em memória por 30 minutos, evitando sobrecarga
+  no portal do TCE-RS em consultas repetidas.
+
+COMPARTILHAMENTO EXTERNO (Cloudflare Tunnel)
+---------------------------------------------
+  Arquivo: iniciar_compartilhamento_cloudflare.bat
+  Permite expor o servidor local via túnel Cloudflare (cloudflared),
+  possibilitando acesso ao dashboard a partir de dispositivos externos
+  (celular, outro computador) sem precisar abrir portas no roteador.
+
+
+================================================================================
+CLIENTES MONITORADOS
+================================================================================
+
+O sistema monitora atualmente ~110 entidades municipais do Rio Grande do Sul,
+divididas entre Prefeituras Municipais (PM) e Câmaras Municipais (CM).
+
+Os dados dos clientes (nome, código TCE-RS, código IBGE, tipo) são armazenados
+no próprio arquivo dashboard_app.js (array CLIENTS_DATA) e persistidos no
+localStorage do navegador para edições locais.
+
+Exemplos de clientes:
+  - PM Ametista do Sul    (cód. TCE: 88023)
+  - PM Constantina        (cód. TCE: 45700)
+  - PM Porto Mauá         (cód. TCE: 88050)
+  (e outros ~107 municípios)
+
+
+================================================================================
+EQUIPE / USUÁRIOS DO SISTEMA
+================================================================================
+
+O dashboard possui perfis de usuário gerenciados por localStorage:
+  - Bruno Ramos           (Supervisor / Administrador)
+  - Marcus Sergio de Oliveira
+  - Luana de Matos Clee
+  - Hugo Munareto
+  - Jade Zaira Clavé da Silveira Uchôa de Medeiros
+  - Gioliani (colaborador)
+
+Não há autenticação por senha — o sistema é de uso interno e restrito
+ao ambiente da Delta Gestão Pública.
+
+
+================================================================================
+DEPLOY E INFRAESTRUTURA
+================================================================================
+
+  Plataforma: Vercel (https://vercel.com)
+  Projeto:    vertical-contabil (conta: salvagnibrunos-projects)
+  Região:     gru1 (São Paulo)
+  Configuração: vercel.json
+    - Build: @vercel/node apontando para server/server.js
+    - Todas as rotas redirecionadas para server/server.js
+    - Arquivos estáticos (HTML, CSS, JS, imagens) incluídos no build
+
+  Infraestrutura alternativa (não ativa):
+    - Fly.io: configuração em server/Dockerfile + server/fly.toml
+      App: delta-pad-api, região: gru (São Paulo)
+      (Preparado para deploy caso o Vercel seja inadequado)
+
+  Repositório Git:
+    GitHub: https://github.com/salvagnibruno/verticalContabil
+    Branch: master
+
+
+================================================================================
+ARQUIVOS DO PROJETO
+================================================================================
+
+  Raiz do projeto:
+    index.html                         → Página principal do dashboard
+    dashboard_app.js                   → Lógica JavaScript (~110 KB)
+    dashboard_style.css                → Estilos CSS (~24 KB)
+    logo_delta.png                     → Logo Delta (26 KB)
+    media_logo.png                     → Logo alternativo (293 KB)
+    vercel.json                        → Configuração de deploy Vercel
+    .gitignore                         → Arquivos ignorados pelo Git
+    Iniciar Dashboard.bat              → Inicia servidor local (Windows)
+    iniciar_compartilhamento_cloudflare.bat → Túnel Cloudflare
+
+  Pasta server/:
+    server.js                          → Servidor Node.js/Express
+    package.json                       → Dependências Node.js
+    package-lock.json                  → Lock de dependências
+    Dockerfile                         → Container Docker (Fly.io)
+    fly.toml                           → Configuração Fly.io
+
+  Pasta team_photos/:
+    bruno.jpg, gioliani.jpg, hugo.jpg  → Fotos da equipe
+    jade.jpg, luana.jpg, marcus.jpg
+
+
+================================================================================
+OBSERVAÇÕES TÉCNICAS IMPORTANTES
+================================================================================
+
+1. BLOQUEIO DE IP NO TCE-RS
+   O portal do TCE-RS bloqueia IPs de provedores cloud (Vercel, AWS, etc.).
+   Para consultas reais, é OBRIGATÓRIO usar o servidor local
+   ("Iniciar Dashboard.bat") a partir do computador do escritório.
+
+2. ATUALIZAÇÃO AUTOMÁTICA A CADA 10 MINUTOS
+   O browser executa setInterval(() => refreshModuleData(true), 600000)
+   que dispara nova consulta ao servidor a cada 10 minutos enquanto o
+   dashboard estiver aberto. O servidor possui cache de 30 minutos para
+   evitar sobrecarga no TCE-RS.
+
+3. CONSULTA EM LOTE (BATCH)
+   Ao carregar o módulo PAD, o sistema faz uma única requisição POST
+   /api/pad-status-batch enviando todos os ~110 códigos de órgãos de uma
+   vez. O servidor processa em paralelo (até 40 simultâneos por chunk)
+   e retorna todos os status em uma resposta só.
+
+4. BUG CORRIGIDO (18/05/2026)
+   Corrigido falso positivo na identificação do mês: a busca por "1º mês"
+   poderia incorretamente encontrar "11º mês" (Novembro) por substring
+   match. Corrigido com ancoragem no delimitador HTML ">" da tag.
+
+
+================================================================================
+  Backup gerado por: Claude Sonnet 4.6 (Anthropic)
+  Data: 18/05/2026 | Commit: ef92a17 (branch master)
+================================================================================

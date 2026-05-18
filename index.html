@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Delta Gestão Pública | Dashboard Vertical Contábil</title>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="dashboard_style.css?v=20260518c">
+    <link rel="stylesheet" href="dashboard_style.css?v=20260518d">
 </head>
 <body class="dashboard-body">
     <!-- Header with Official Logo -->
@@ -531,12 +531,18 @@
                 
                 <div class="photo-preview-container">
                     <img id="photo-preview-img" src="https://ui-avatars.com/api/?name=User&background=f0f4f8&color=005eb8" alt="Preview">
-                    <button type="button" class="btn-small" style="font-size: 0.7rem;" onclick="alert('Funcionalidade de upload de foto em desenvolvimento. Por enquanto, usamos avatares baseados no nome.')">Alterar Foto</button>
+                    <label for="member-photo-upload" class="btn-small" style="font-size:0.75rem; cursor:pointer; display:inline-block; padding:6px 12px; background:#005eb8; color:#fff; border-radius:6px;">📷 Alterar Foto</label>
+                    <input type="file" id="member-photo-upload" accept="image/*" style="display:none;" onchange="handleMemberPhotoUpload(this.files[0])">
                 </div>
 
                 <div class="form-group">
                     <label>Nome Completo *</label>
                     <input type="text" id="member-full-name" required placeholder="Ex: Gioliani Godois">
+                </div>
+
+                <div class="form-group">
+                    <label>E-mail (login do sistema)</label>
+                    <input type="email" id="member-email" placeholder="nome@deltainf.com.br">
                 </div>
 
                 <div class="form-group">
@@ -559,7 +565,25 @@
                     <label class="checkbox-container">
                         <input type="checkbox" id="member-is-supervisor">
                         <span class="checkmark"></span>
-                        Perfil de Supervisor (Acesso Total)
+                        Perfil Administrador (Acesso Total)
+                    </label>
+                </div>
+
+                <!-- Bloco de acesso ao sistema -->
+                <div style="border:1px solid #e3e8ef; border-radius:8px; padding:14px; background:#f8fbff; margin-top:10px;">
+                    <div style="font-size:0.85rem; font-weight:700; color:#003580; margin-bottom:10px;">🔐 Acesso ao Sistema</div>
+
+                    <div id="member-pwd-status" style="font-size:0.78rem; color:#666; margin-bottom:8px; display:none;"></div>
+
+                    <div class="form-group" style="margin-bottom:8px;">
+                        <label style="font-size:0.78rem;">Senha de Primeiro Acesso <span style="color:#888;">(deixe em branco para não alterar)</span></label>
+                        <input type="text" id="member-initial-pwd" placeholder="Ex: Delta@2026" autocomplete="off">
+                    </div>
+
+                    <label class="checkbox-container" style="font-size:0.8rem;">
+                        <input type="checkbox" id="member-must-change-pwd" checked>
+                        <span class="checkmark"></span>
+                        Exigir troca de senha no próximo login
                     </label>
                 </div>
 
@@ -652,6 +676,6 @@
     </div>
 
     <script>window.IS_COLABORADOR = false;</script>
-    <script src="dashboard_app.js?v=20260518c"></script>
+    <script src="dashboard_app.js?v=20260518d"></script>
 </body>
 </html>
