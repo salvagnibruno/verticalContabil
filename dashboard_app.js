@@ -3231,12 +3231,167 @@ init();
 /**
  * CLIENTS MANAGEMENT (SUPERVISOR)
  */
+// ──────────────────────────────────────────────────────────────
+// IMPRESSÃO DO PANORAMA
+// Abre uma nova janela com layout próprio para impressão, contendo:
+//  - cabeçalho com logo e nome da Delta
+//  - módulo (PAD/MSC/etc), competência (mês/ano)
+//  - filtros aplicados (Visualizar:)
+//  - data e hora de emissão
+//  - lista de clientes ativos com status atual
+// Usa state.clientStatuses preenchido pela última consulta.
+// ──────────────────────────────────────────────────────────────
+window.printPanorama = function() {
+    const monthName = MONTHS[state.selectedMonth] || '';
+    const competencia = `${monthName} / ${state.selectedYear}`;
+    const f = state.filterView || { all: true, legais: false, semLegais: false };
+    const filtros = [
+        f.all ? 'Todos os clientes' : null,
+        f.legais ? 'Entregas Legais' : null,
+        f.semLegais ? 'Sem entregas legais' : null
+    ].filter(Boolean).join(', ') || 'Todos os clientes';
+
+    // Lista de clientes ativos no contexto atual (mesmo critério do painel)
+    const activeClients = state.clients
+        .filter(c => isClientActive(c, state.selectedMonth, state.selectedYear) && applyLegaisClientFilter(c))
+        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR', { sensitivity: 'base' }));
+
+    const STATUS_LABEL = { 'on-time': 'No Prazo', 'late': 'Atrasado', 'pending': 'Não Enviado' };
+    const STATUS_COLOR = { 'on-time': '#2ecc71', 'late': '#f1c40f', 'pending': '#e74c3c' };
+
+    let onTime = 0, late = 0, pending = 0;
+    activeClients.forEach(c => {
+        const s = state.clientStatuses[c.code];
+        if (s === 'on-time') onTime++;
+        else if (s === 'late') late++;
+        else pending++;
+    });
+
+    const rowsHtml = activeClients.map(c => {
+        const s = state.clientStatuses[c.code] || 'pending';
+        return `<tr>
+            <td>${c.code || ''}</td>
+            <td>${c.type || ''}</td>
+            <td>${c.name || ''}</td>
+            <td style="color:${STATUS_COLOR[s]}; font-weight:700;">${STATUS_LABEL[s]}</td>
+        </tr>`;
+    }).join('');
+
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const emissao = `${pad(now.getDate())}/${pad(now.getMonth()+1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+    const logoUrl = `${window.location.origin}/logo_delta.png`;
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<title>Panorama ${state.module} - ${competencia}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; margin: 24px; color: #1a1a1a; }
+  header { display: flex; align-items: center; gap: 16px; border-bottom: 3px solid #003a70; padding-bottom: 12px; margin-bottom: 18px; }
+  header img { height: 50px; }
+  header .brand h1 { margin: 0; color: #003a70; font-size: 1.3rem; }
+  header .brand p  { margin: 2px 0 0; color: #6c757d; font-size: 0.85rem; }
+  .meta { background:#f4f7fa; border:1px solid #e6ecf2; padding:12px 16px; border-radius:6px; margin-bottom:16px; font-size:0.9rem; }
+  .meta div { margin: 3px 0; }
+  .meta strong { color: #003a70; }
+  .summary { display: flex; gap: 12px; margin-bottom: 18px; }
+  .summary .card { flex:1; border:1px solid #e0e0e0; border-radius:6px; padding:10px 14px; text-align:center; }
+  .summary .card .n { font-size: 1.6rem; font-weight: 700; margin: 4px 0; }
+  .summary .on   { color: #2ecc71; }
+  .summary .lt   { color: #f1c40f; }
+  .summary .pd   { color: #e74c3c; }
+  table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+  th, td { text-align:left; padding:7px 10px; border-bottom:1px solid #eee; }
+  th { background:#003a70; color:#fff; font-weight:600; }
+  tr:nth-child(even) td { background:#fafbfd; }
+  footer { margin-top: 24px; font-size: 0.75rem; color:#6c757d; text-align:center; border-top:1px solid #eee; padding-top:10px; }
+  @media print {
+    body { margin: 12mm; }
+    @page { size: A4; margin: 8mm; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <img src="${logoUrl}" alt="Delta" onerror="this.style.display='none'">
+    <div class="brand">
+      <h1>Delta Gestão Pública</h1>
+      <p>Panorama Vertical Contábil — relatório emitido pelo dashboard</p>
+    </div>
+  </header>
+
+  <div class="meta">
+    <div><strong>Módulo:</strong> ${state.module}</div>
+    <div><strong>Competência:</strong> ${competencia}</div>
+    <div><strong>Filtros:</strong> ${filtros}</div>
+    <div><strong>Emitido em:</strong> ${emissao}</div>
+    <div><strong>Usuário:</strong> ${(state.loggedInUser && state.loggedInUser.name) || '—'}</div>
+  </div>
+
+  <div class="summary">
+    <div class="card"><div>No Prazo</div><div class="n on">${onTime}</div></div>
+    <div class="card"><div>Atrasados</div><div class="n lt">${late}</div></div>
+    <div class="card"><div>Não Enviados</div><div class="n pd">${pending}</div></div>
+    <div class="card"><div>Total</div><div class="n">${activeClients.length}</div></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Cód.</th><th>Tipo</th><th>Cliente</th><th>Status</th></tr>
+    </thead>
+    <tbody>${rowsHtml || '<tr><td colspan="4" style="text-align:center; padding:20px;">Nenhum cliente para os filtros atuais.</td></tr>'}</tbody>
+  </table>
+
+  <footer>Delta Gestão Pública • ${emissao}</footer>
+
+  <script>
+    window.onload = () => { setTimeout(() => window.print(), 350); };
+  <\/script>
+</body>
+</html>`;
+
+    const w = window.open('', '_blank', 'width=900,height=800');
+    if (!w) { alert('Permita pop-ups para imprimir o panorama.'); return; }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+};
+
+// Filtro de tipo na Gestão de Clientes (UI-only, não persistido)
+let _clientsTypeFilter = 'ALL';
+
+window.onClientsTypeFilterChange = function(value) {
+    _clientsTypeFilter = value || 'ALL';
+    renderClientsMgmtTable();
+};
+
 function renderClientsMgmtTable() {
     const tbody = document.querySelector('#clients-mgmt-table tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
 
-    state.clients.forEach((c, idx) => {
+    // Atualiza o select de tipos com os valores únicos presentes
+    const selectEl = document.getElementById('clients-type-filter');
+    if (selectEl) {
+        const types = Array.from(new Set(state.clients.map(c => c.type).filter(Boolean))).sort();
+        const current = _clientsTypeFilter;
+        selectEl.innerHTML =
+            `<option value="ALL">Todos os tipos</option>` +
+            types.map(t => `<option value="${t}" ${t === current ? 'selected' : ''}>${t}</option>`).join('');
+    }
+
+    // Cria uma lista para renderização ordenada por nome, preservando o idx original
+    // (idx original é fundamental: saveClientsChanges usa para localizar state.clients[idx])
+    const rows = state.clients
+        .map((c, originalIdx) => ({ c, idx: originalIdx }))
+        .filter(({ c }) => _clientsTypeFilter === 'ALL' || c.type === _clientsTypeFilter)
+        .sort((a, b) => (a.c.name || '').localeCompare(b.c.name || '', 'pt-BR', { sensitivity: 'base' }));
+
+    rows.forEach(({ c, idx }) => {
         const row = document.createElement('tr');
         const hasLegal = !!c.entregasLegais;
         row.innerHTML = `

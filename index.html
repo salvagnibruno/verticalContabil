@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Delta Gestão Pública | Dashboard Vertical Contábil</title>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="dashboard_style.css?v=20260518L">
+    <link rel="stylesheet" href="dashboard_style.css?v=20260518m">
 </head>
 <body class="dashboard-body">
     <!-- Header with Official Logo -->
@@ -75,21 +75,24 @@
                 <section class="panorama-section card fade-in">
                     <div class="card-header">
                         <h2>📌 Panorama: <span id="current-module-title">PAD</span></h2>
-                        <div class="filters">
+                        <div class="filters" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
                             <button id="btn-refresh" class="btn-refresh-green">Atualizar</button>
+                            <button id="btn-print-panorama" onclick="printPanorama()" title="Imprimir resultados desta consulta"
+                                    style="background:#fff; border:1px solid #005eb8; color:#005eb8; padding:6px 12px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:0.85rem; font-weight:600;">
+                                🖨 Imprimir
+                            </button>
                             <select id="filter-month"></select>
                             <select id="filter-year"></select>
-                            <div style="display:flex; align-items:center; gap:14px; font-size:0.8rem; white-space:nowrap; flex-wrap:wrap;">
-                                <span style="font-weight:600; color:#005eb8;">Visualizar:</span>
-                                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                            <div style="display:inline-flex; align-items:center; gap:14px; font-size:0.8rem; flex-wrap:nowrap;">
+                                <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
                                     <input type="checkbox" id="filter-view-all" onchange="onFilterViewChange('all', this.checked)" checked>
                                     Todos os clientes
                                 </label>
-                                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                                <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
                                     <input type="checkbox" id="filter-view-legais" onchange="onFilterViewChange('legais', this.checked)">
                                     Entregas Legais
                                 </label>
-                                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                                <label style="display:inline-flex; align-items:center; gap:5px; cursor:pointer; white-space:nowrap;">
                                     <input type="checkbox" id="filter-view-sem-legais" onchange="onFilterViewChange('semLegais', this.checked)">
                                     Sem entregas legais
                                 </label>
@@ -196,6 +199,13 @@
                 <section class="card fade-in">
                     <div class="card-header">
                         <h2>📊 Gerenciamento de Clientes (Supervisor)</h2>
+                        <div style="display:flex; align-items:center; gap:8px; font-size:0.85rem;">
+                            <label for="clients-type-filter" style="font-weight:600; color:#005eb8;">Tipo:</label>
+                            <select id="clients-type-filter" onchange="onClientsTypeFilterChange(this.value)"
+                                    style="padding:6px 10px; border:1px solid #ddd; border-radius:6px; font-family:inherit; font-size:0.85rem;">
+                                <option value="ALL">Todos os tipos</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="clients-table-container">
                         <table class="clients-table" id="clients-mgmt-table">
@@ -687,6 +697,6 @@
     </div>
 
     <script>window.IS_COLABORADOR = false;</script>
-    <script src="dashboard_app.js?v=20260518L"></script>
+    <script src="dashboard_app.js?v=20260518m"></script>
 </body>
 </html>
