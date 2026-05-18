@@ -351,9 +351,34 @@ function applyRoleRestrictions() {
 }
 
 function applyLegaisFilter() {
-    const cb = document.getElementById('filter-legais-only');
-    if (cb) cb.checked = state.filterLegaisOnly;
+    // Sincroniza os 3 checkboxes do filtro "Visualizar:" com o estado
+    const f = state.filterView || { all: true, legais: false, semLegais: false };
+    const cbAll = document.getElementById('filter-view-all');
+    const cbLeg = document.getElementById('filter-view-legais');
+    const cbSem = document.getElementById('filter-view-sem-legais');
+    if (cbAll) cbAll.checked = !!f.all;
+    if (cbLeg) cbLeg.checked = !!f.legais;
+    if (cbSem) cbSem.checked = !!f.semLegais;
 }
+
+// Handler dos 3 checkboxes. Multi-seleção: marcar "Todos" desmarca os outros dois,
+// e marcar qualquer específico desmarca o "Todos". Os 2 específicos coexistem.
+window.onFilterViewChange = function(which, checked) {
+    if (!state.filterView) state.filterView = { all: true, legais: false, semLegais: false };
+    if (which === 'all') {
+        state.filterView.all = checked;
+        if (checked) { state.filterView.legais = false; state.filterView.semLegais = false; }
+    } else {
+        state.filterView[which] = checked;
+        if (checked) state.filterView.all = false;
+        // Se nada estiver marcado, volta automaticamente a "Todos"
+        if (!state.filterView.all && !state.filterView.legais && !state.filterView.semLegais) {
+            state.filterView.all = true;
+        }
+    }
+    applyLegaisFilter();
+    refreshModuleData();
+};
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
@@ -401,7 +426,7 @@ let state = {
     currentCounts: { onTime: 0, late: 0, pending: 0 },
     targetCounts: { onTime: 0, late: 0, pending: 0 },
     loggedInUser: null, // { email, name, role: 'admin'|'colaborador', teamMemberName }
-    filterLegaisOnly: false
+    filterView: { all: true, legais: false, semLegais: false }
 };
 
 // V4: Clean wipe of client dates as requested
@@ -1566,8 +1591,8 @@ function isClientActive(client, month, year) {
     return viewDay <= endDay;
 }
 
-function applyLegaisClientFilter(c) {
-    if (!state.filterLegaisOnly) return true;
+// Cliente está com "Entregas Legais ativas hoje"?
+function isClientLegaisActive(c) {
     if (!c.entregasLegais) return false;
     const today = new Date();
     if (c.entregasLegaisStart) {
@@ -1581,6 +1606,17 @@ function applyLegaisClientFilter(c) {
     return true;
 }
 
+function applyLegaisClientFilter(c) {
+    const f = state.filterView || { all: true, legais: false, semLegais: false };
+    // "Todos" marcado → mostra tudo
+    if (f.all) return true;
+    // Nenhum marcado → mostra tudo (defensivo)
+    if (!f.legais && !f.semLegais) return true;
+    const active = isClientLegaisActive(c);
+    if (f.legais   && active)   return true;
+    if (f.semLegais && !active) return true;
+    return false;
+}
 
 function refreshSimulated() {
     const lastDay = new Date(state.selectedYear, state.selectedMonth + 1, 0);

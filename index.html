@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Delta Gestão Pública | Dashboard Vertical Contábil</title>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="dashboard_style.css?v=20260518e">
+    <link rel="stylesheet" href="dashboard_style.css?v=20260518j">
 </head>
 <body class="dashboard-body">
     <!-- Header with Official Logo -->
@@ -79,10 +79,21 @@
                             <button id="btn-refresh" class="btn-refresh-green">Atualizar</button>
                             <select id="filter-month"></select>
                             <select id="filter-year"></select>
-                            <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; cursor:pointer; white-space:nowrap;">
-                                <input type="checkbox" id="filter-legais-only" onchange="state.filterLegaisOnly=this.checked; refreshModuleData();">
-                                Somente Entregas Legais
-                            </label>
+                            <div style="display:flex; align-items:center; gap:14px; font-size:0.8rem; white-space:nowrap; flex-wrap:wrap;">
+                                <span style="font-weight:600; color:#005eb8;">Visualizar:</span>
+                                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                                    <input type="checkbox" id="filter-view-all" onchange="onFilterViewChange('all', this.checked)" checked>
+                                    Todos os clientes
+                                </label>
+                                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                                    <input type="checkbox" id="filter-view-legais" onchange="onFilterViewChange('legais', this.checked)">
+                                    Entregas Legais
+                                </label>
+                                <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
+                                    <input type="checkbox" id="filter-view-sem-legais" onchange="onFilterViewChange('semLegais', this.checked)">
+                                    Sem entregas legais
+                                </label>
+                            </div>
                         </div>
                     </div>
                     
@@ -676,6 +687,6 @@
     </div>
 
     <script>window.IS_COLABORADOR = false;</script>
-    <script src="dashboard_app.js?v=20260518e"></script>
+    <script src="dashboard_app.js?v=20260518j"></script>
 </body>
 </html>

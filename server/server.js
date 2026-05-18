@@ -18,13 +18,59 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // =============================================================
-// AUTENTICAÇÃO — armazenamento de usuários em arquivo JSON
+// VERCEL KV (REST API) — banco de dados persistente
+// Sem dependências extras: usa node-fetch que já está no projeto.
+// Quando KV_REST_API_URL e KV_REST_API_TOKEN existem como env vars,
+// todo o armazenamento de usuários vai para o KV (persiste pra sempre).
+// Sem KV: cai pro arquivo /tmp (Vercel efêmero) ou bundled (local).
 // =============================================================
 
-const USERS_FILE_BUNDLED = path.join(__dirname, 'users.json'); // bundled with deploy (seed)
-const USERS_FILE_WRITABLE = process.env.VERCEL
-    ? '/tmp/users.json'   // Vercel: ephemeral mas pelo menos persiste durante instância warm
-    : path.join(__dirname, 'users.json'); // local: persiste de verdade
+const KV_URL   = process.env.KV_REST_API_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+const KV_ENABLED = !!(KV_URL && KV_TOKEN);
+
+async function kvGet(key) {
+    if (!KV_ENABLED) return null;
+    try {
+        const r = await fetch(`${KV_URL}/get/${encodeURIComponent(key)}`, {
+            headers: { Authorization: `Bearer ${KV_TOKEN}` },
+            timeout: 5000
+        });
+        if (!r.ok) return null;
+        const j = await r.json();
+        if (j.result === null || j.result === undefined) return null;
+        if (typeof j.result === 'string') {
+            try { return JSON.parse(j.result); } catch { return j.result; }
+        }
+        return j.result;
+    } catch (e) {
+        console.error('[KV] get falhou:', e.message);
+        return null;
+    }
+}
+
+async function kvSet(key, value) {
+    if (!KV_ENABLED) return false;
+    try {
+        const r = await fetch(`${KV_URL}/set/${encodeURIComponent(key)}`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${KV_TOKEN}`, 'Content-Type': 'text/plain' },
+            body: JSON.stringify(value),
+            timeout: 5000
+        });
+        return r.ok;
+    } catch (e) {
+        console.error('[KV] set falhou:', e.message);
+        return false;
+    }
+}
+
+// =============================================================
+// AUTENTICAÇÃO — KV-first, fallback para arquivo (dev local)
+// =============================================================
+
+const USERS_FILE_BUNDLED  = path.join(__dirname, 'users.json'); // bundled (seed)
+const USERS_FILE_WRITABLE = process.env.VERCEL ? '/tmp/users.json' : path.join(__dirname, 'users.json');
 
 function defaultSeed() {
     return {
@@ -39,26 +85,32 @@ function defaultSeed() {
     };
 }
 
-function loadUsers() {
-    // 1) tenta o arquivo writable (mudanças recentes)
-    try {
-        if (fs.existsSync(USERS_FILE_WRITABLE)) {
-            return JSON.parse(fs.readFileSync(USERS_FILE_WRITABLE, 'utf8'));
-        }
-    } catch (e) { console.error('Erro lendo users writable:', e.message); }
-
-    // 2) fallback: arquivo bundled (seed)
-    try {
-        if (fs.existsSync(USERS_FILE_BUNDLED)) {
-            return JSON.parse(fs.readFileSync(USERS_FILE_BUNDLED, 'utf8'));
-        }
-    } catch (e) { console.error('Erro lendo users bundled:', e.message); }
-
-    // 3) seed em memória
+// Lê do KV se ativo; se vazio na primeira vez, semeia a partir do bundled.
+// Sem KV: cai pro modelo legado de arquivo.
+async function loadUsers() {
+    if (KV_ENABLED) {
+        const kvUsers = await kvGet('delta:users');
+        if (kvUsers && typeof kvUsers === 'object' && Object.keys(kvUsers).length > 0) return kvUsers;
+        // Primeira leitura: semeia a partir do arquivo bundled
+        try {
+            if (fs.existsSync(USERS_FILE_BUNDLED)) {
+                const seed = JSON.parse(fs.readFileSync(USERS_FILE_BUNDLED, 'utf8'));
+                await kvSet('delta:users', seed);
+                return seed;
+            }
+        } catch (e) { console.error('Erro semeando KV:', e.message); }
+        const seed = defaultSeed();
+        await kvSet('delta:users', seed);
+        return seed;
+    }
+    // Fallback modo arquivo (dev local ou Vercel sem KV)
+    try { if (fs.existsSync(USERS_FILE_WRITABLE)) return JSON.parse(fs.readFileSync(USERS_FILE_WRITABLE, 'utf8')); } catch {}
+    try { if (fs.existsSync(USERS_FILE_BUNDLED))  return JSON.parse(fs.readFileSync(USERS_FILE_BUNDLED, 'utf8')); } catch {}
     return defaultSeed();
 }
 
-function saveUsers(users) {
+async function saveUsers(users) {
+    if (KV_ENABLED) return await kvSet('delta:users', users);
     try {
         fs.writeFileSync(USERS_FILE_WRITABLE, JSON.stringify(users, null, 2), 'utf8');
         return true;
@@ -75,19 +127,19 @@ function stripPassword(user) {
 }
 
 // GET /api/auth/users → lista todos os usuários (sem passwordHash)
-app.get('/api/auth/users', (req, res) => {
-    const users = loadUsers();
+app.get('/api/auth/users', async (req, res) => {
+    const users = await loadUsers();
     const safe = {};
     for (const k of Object.keys(users)) safe[k] = stripPassword(users[k]);
     res.json(safe);
 });
 
 // POST /api/auth/login → valida credenciais
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body || {};
     if (!email || !password) return res.status(400).json({ ok: false, error: 'E-mail e senha são obrigatórios.' });
 
-    const users = loadUsers();
+    const users = await loadUsers();
     const user = users[String(email).toLowerCase().trim()];
     if (!user) return res.json({ ok: false, error: 'E-mail não encontrado.' });
 
@@ -97,13 +149,12 @@ app.post('/api/auth/login', (req, res) => {
     res.json({ ok: true, user: stripPassword(user), mustChangePassword: !!user.mustChangePassword });
 });
 
-// POST /api/auth/users/upsert → cria ou atualiza usuário (admin only — checagem no client)
-// Body: { email, name, role, passwordHash?, mustChangePassword?, teamMemberName }
-app.post('/api/auth/users/upsert', (req, res) => {
+// POST /api/auth/users/upsert → cria ou atualiza usuário
+app.post('/api/auth/users/upsert', async (req, res) => {
     const { email, name, role, passwordHash, mustChangePassword, teamMemberName } = req.body || {};
     if (!email) return res.status(400).json({ ok: false, error: 'email obrigatório.' });
 
-    const users = loadUsers();
+    const users = await loadUsers();
     const key = String(email).toLowerCase().trim();
     const existing = users[key] || {};
     users[key] = {
@@ -114,17 +165,16 @@ app.post('/api/auth/users/upsert', (req, res) => {
         mustChangePassword: typeof mustChangePassword === 'boolean' ? mustChangePassword : (existing.mustChangePassword || false),
         teamMemberName: teamMemberName || existing.teamMemberName || name || key
     };
-    if (saveUsers(users)) res.json({ ok: true, user: stripPassword(users[key]) });
+    if (await saveUsers(users)) res.json({ ok: true, user: stripPassword(users[key]) });
     else res.status(500).json({ ok: false, error: 'Falha ao gravar.' });
 });
 
 // POST /api/auth/users/rename → renomeia chave (e-mail mudou)
-// Body: { oldEmail, newEmail, name, role, passwordHash?, mustChangePassword?, teamMemberName }
-app.post('/api/auth/users/rename', (req, res) => {
+app.post('/api/auth/users/rename', async (req, res) => {
     const { oldEmail, newEmail } = req.body || {};
     if (!oldEmail || !newEmail) return res.status(400).json({ ok: false });
 
-    const users = loadUsers();
+    const users = await loadUsers();
     const oldKey = String(oldEmail).toLowerCase().trim();
     const newKey = String(newEmail).toLowerCase().trim();
     const old = users[oldKey];
@@ -140,34 +190,32 @@ app.post('/api/auth/users/rename', (req, res) => {
         mustChangePassword: typeof req.body.mustChangePassword === 'boolean' ? req.body.mustChangePassword : old.mustChangePassword,
         teamMemberName: req.body.teamMemberName || old.teamMemberName
     };
-    if (saveUsers(users)) res.json({ ok: true, user: stripPassword(users[newKey]) });
+    if (await saveUsers(users)) res.json({ ok: true, user: stripPassword(users[newKey]) });
     else res.status(500).json({ ok: false });
 });
 
 // POST /api/auth/users/delete → remove usuário
-app.post('/api/auth/users/delete', (req, res) => {
+app.post('/api/auth/users/delete', async (req, res) => {
     const { email } = req.body || {};
     if (!email) return res.status(400).json({ ok: false });
 
-    const users = loadUsers();
+    const users = await loadUsers();
     const key = String(email).toLowerCase().trim();
     delete users[key];
-    if (saveUsers(users)) res.json({ ok: true });
+    if (await saveUsers(users)) res.json({ ok: true });
     else res.status(500).json({ ok: false });
 });
 
 // POST /api/auth/change-password → troca de senha
-// Body: { email, currentPassword, newPassword }
-app.post('/api/auth/change-password', (req, res) => {
+app.post('/api/auth/change-password', async (req, res) => {
     const { email, currentPassword, newPassword } = req.body || {};
     if (!email || !newPassword) return res.status(400).json({ ok: false, error: 'Campos obrigatórios faltando.' });
 
-    const users = loadUsers();
+    const users = await loadUsers();
     const key = String(email).toLowerCase().trim();
     const user = users[key];
     if (!user) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
 
-    // Se foi passada senha atual (troca voluntária), valida
     if (currentPassword !== undefined && currentPassword !== null) {
         const inputHash = Buffer.from(currentPassword).toString('base64');
         if (user.passwordHash !== inputHash) return res.json({ ok: false, error: 'Senha atual incorreta.' });
@@ -176,17 +224,16 @@ app.post('/api/auth/change-password', (req, res) => {
     user.passwordHash = Buffer.from(newPassword).toString('base64');
     user.mustChangePassword = false;
     users[key] = user;
-    if (saveUsers(users)) res.json({ ok: true });
+    if (await saveUsers(users)) res.json({ ok: true });
     else res.status(500).json({ ok: false });
 });
 
-// POST /api/auth/sync → migração one-shot: client envia os users que tem no localStorage
-// e o servidor faz merge (sem sobrescrever existentes com hash vazio)
-app.post('/api/auth/sync', (req, res) => {
+// POST /api/auth/sync → migração one-shot do localStorage do cliente
+app.post('/api/auth/sync', async (req, res) => {
     const { users: clientUsers } = req.body || {};
     if (!clientUsers || typeof clientUsers !== 'object') return res.status(400).json({ ok: false });
 
-    const users = loadUsers();
+    const users = await loadUsers();
     let added = 0, updated = 0;
     for (const [email, u] of Object.entries(clientUsers)) {
         const key = String(email).toLowerCase().trim();
@@ -199,7 +246,7 @@ app.post('/api/auth/sync', (req, res) => {
             // Aqui optamos por NÃO sobrescrever — admin pode editar via /upsert se precisar.
         }
     }
-    if (added + updated > 0) saveUsers(users);
+    if (added + updated > 0) await saveUsers(users);
     res.json({ ok: true, added, updated, total: Object.keys(users).length });
 });
 
