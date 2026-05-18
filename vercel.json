@@ -12,7 +12,8 @@
           "dashboard_app.js",
           "logo_delta.png",
           "media_logo.png",
-          "team_photos/**"
+          "team_photos/**",
+          "server/users.json"
         ],
         "maxDuration": 60
       }

@@ -132,38 +132,110 @@ const TEAM_INITIAL = [
 
 const DEFAULT_ADMIN_EMAIL = 'bruno.ramos@deltainf.com.br';
 
-function getUsers() {
-    const stored = localStorage.getItem('delta_users');
-    if (!stored) {
-        // Seed: admin padrão
-        const users = {
-            [DEFAULT_ADMIN_EMAIL]: {
-                email: DEFAULT_ADMIN_EMAIL,
-                name: 'Bruno Ramos',
-                role: 'admin',
-                passwordHash: btoa('123'),
-                mustChangePassword: true,
-                teamMemberName: 'Bruno Ramos'
-            }
-        };
-        localStorage.setItem('delta_users', JSON.stringify(users));
-        return users;
+// Resolve a URL base da API — usa o mesmo origin (Vercel) ou localhost:3131 (arquivo local)
+function getAuthApiBase() {
+    const origin = window.location.origin;
+    if (origin && !origin.startsWith('file') && origin !== 'null') {
+        return origin;
     }
-    return JSON.parse(stored);
+    return 'http://localhost:3131';
 }
 
+// Cache local dos usuários (sincronizado com o servidor). Usado apenas para leitura síncrona
+// em locais que ainda não foram convertidos para async. NÃO é a fonte da verdade.
+let _usersCache = null;
+
+async function fetchUsersFromServer() {
+    try {
+        const r = await fetch(`${getAuthApiBase()}/api/auth/users`, { cache: 'no-store' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const users = await r.json();
+        _usersCache = users;
+        // Espelha no localStorage como cache para leitura síncrona de fallback
+        try { localStorage.setItem('delta_users', JSON.stringify(users)); } catch {}
+        return users;
+    } catch (e) {
+        console.warn('[auth] fetchUsersFromServer falhou:', e.message);
+        // Fallback: usa o último cache do localStorage
+        const stored = localStorage.getItem('delta_users');
+        if (stored) { try { _usersCache = JSON.parse(stored); } catch {} }
+        return _usersCache || {};
+    }
+}
+
+// Versão síncrona: retorna o cache (usuários precisam ter sido carregados antes).
+// Para o NOVO ciclo de vida, chamamos fetchUsersFromServer() no boot.
+function getUsers() {
+    if (_usersCache) return _usersCache;
+    const stored = localStorage.getItem('delta_users');
+    if (stored) { try { _usersCache = JSON.parse(stored); return _usersCache; } catch {} }
+    return {};
+}
+
+// Persiste no servidor (upsert para cada chave alterada). Para uso simples, prefira
+// chamar diretamente apiUpsertUser/apiDeleteUser/apiRenameUser nos pontos de edição.
 function saveUsers(users) {
-    localStorage.setItem('delta_users', JSON.stringify(users));
+    _usersCache = users;
+    try { localStorage.setItem('delta_users', JSON.stringify(users)); } catch {}
+    // Nota: não envia automaticamente para o servidor — quem chamar saveUsers em
+    // um ponto de edição deve, em paralelo, chamar a API correspondente (upsert/rename/delete).
+}
+
+async function apiUpsertUser(user) {
+    const r = await fetch(`${getAuthApiBase()}/api/auth/users/upsert`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(user)
+    });
+    if (!r.ok) throw new Error('upsert falhou');
+    return r.json();
+}
+
+async function apiRenameUser(oldEmail, newUser) {
+    const r = await fetch(`${getAuthApiBase()}/api/auth/users/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ oldEmail, newEmail: newUser.email, ...newUser })
+    });
+    if (!r.ok) throw new Error('rename falhou');
+    return r.json();
+}
+
+async function apiDeleteUser(email) {
+    const r = await fetch(`${getAuthApiBase()}/api/auth/users/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+    });
+    if (!r.ok) throw new Error('delete falhou');
+    return r.json();
+}
+
+async function apiChangePassword(email, newPassword, currentPassword) {
+    const r = await fetch(`${getAuthApiBase()}/api/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, currentPassword, newPassword })
+    });
+    return r.json();
 }
 
 function hashPassword(pwd) { return btoa(pwd); }
 
-function authLogin(email, password) {
-    const users = getUsers();
-    const user = users[email.toLowerCase().trim()];
-    if (!user) return { ok: false, error: 'E-mail não encontrado.' };
-    if (user.passwordHash !== hashPassword(password)) return { ok: false, error: 'Senha incorreta.' };
-    return { ok: true, user };
+// authLogin agora consulta o servidor — fonte da verdade compartilhada entre browsers
+async function authLogin(email, password) {
+    try {
+        const r = await fetch(`${getAuthApiBase()}/api/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+        });
+        const data = await r.json();
+        return data;
+    } catch (e) {
+        console.error('[auth] login falhou:', e.message);
+        return { ok: false, error: 'Erro de conexão com o servidor. Tente novamente.' };
+    }
 }
 
 function getCurrentSession() {
@@ -185,22 +257,30 @@ function isAdmin() {
 }
 
 let _loginPendingUser = null; // usuário aguardando troca de senha
+let _loginPendingPassword = null; // senha atual (necessária para confirmar a troca no servidor)
 
-window.doLogin = function() {
+window.doLogin = async function() {
     const email = (document.getElementById('login-email').value || '').trim();
     const pwd   = document.getElementById('login-password').value;
     const errEl = document.getElementById('login-error');
+    const btnEl = document.querySelector('#login-form-area button');
     errEl.style.display = 'none';
 
-    const result = authLogin(email, pwd);
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Entrando...'; }
+
+    const result = await authLogin(email, pwd);
+
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Entrar'; }
+
     if (!result.ok) {
-        errEl.textContent = result.error;
+        errEl.textContent = result.error || 'Falha no login.';
         errEl.style.display = 'block';
         return;
     }
 
-    if (result.user.mustChangePassword) {
+    if (result.mustChangePassword) {
         _loginPendingUser = result.user;
+        _loginPendingPassword = pwd;
         document.getElementById('login-form-area').style.display = 'none';
         document.getElementById('change-pwd-area').style.display = 'block';
         return;
@@ -209,22 +289,28 @@ window.doLogin = function() {
     completeLogin(result.user);
 };
 
-window.doChangePassword = function() {
+window.doChangePassword = async function() {
     const p1 = document.getElementById('new-pwd-1').value;
     const p2 = document.getElementById('new-pwd-2').value;
     const errEl = document.getElementById('change-pwd-error');
+    const btnEl = document.querySelector('#change-pwd-area button');
     errEl.style.display = 'none';
 
     if (p1.length < 4) { errEl.textContent = 'A senha deve ter no mínimo 4 caracteres.'; errEl.style.display = 'block'; return; }
     if (p1 !== p2)     { errEl.textContent = 'As senhas não coincidem.'; errEl.style.display = 'block'; return; }
 
-    const users = getUsers();
-    users[_loginPendingUser.email].passwordHash = hashPassword(p1);
-    users[_loginPendingUser.email].mustChangePassword = false;
-    saveUsers(users);
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Salvando...'; }
+    const result = await apiChangePassword(_loginPendingUser.email, p1, _loginPendingPassword);
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = 'Salvar Nova Senha e Entrar'; }
+
+    if (!result.ok) {
+        errEl.textContent = result.error || 'Falha ao trocar a senha.';
+        errEl.style.display = 'block';
+        return;
+    }
 
     _loginPendingUser.mustChangePassword = false;
-    _loginPendingUser.passwordHash = hashPassword(p1);
+    _loginPendingPassword = null;
     completeLogin(_loginPendingUser);
 };
 
@@ -374,7 +460,33 @@ const el = {
 /**
  * INICIALIZAÇÃO
  */
-function init() {
+async function init() {
+    // ── Sincronizar usuários do servidor ─────────────────────
+    await fetchUsersFromServer();
+
+    // ── Migração one-shot: enviar usuários antigos do localStorage para o servidor ──
+    // (executa apenas uma vez por browser, para não perder contas criadas antes do servidor)
+    if (!localStorage.getItem('delta_users_migrated_v1')) {
+        const legacyStr = localStorage.getItem('delta_users');
+        if (legacyStr) {
+            try {
+                const legacy = JSON.parse(legacyStr);
+                if (legacy && Object.keys(legacy).length > 0) {
+                    await fetch(`${getAuthApiBase()}/api/auth/sync`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ users: legacy })
+                    }).then(r => r.json()).then(j => {
+                        console.log('[auth] migração:', j);
+                    }).catch(e => console.warn('[auth] migração falhou:', e.message));
+                    // Refresh do cache após a migração
+                    await fetchUsersFromServer();
+                }
+            } catch {}
+        }
+        localStorage.setItem('delta_users_migrated_v1', '1');
+    }
+
     // ── Verificar sessão ──────────────────────────────────────
     if (!state.loggedInUser) {
         const session = getCurrentSession();
@@ -2404,7 +2516,7 @@ window.closeMemberModal = () => {
 };
 
 // Handle Form Submit
-document.getElementById('form-member-edit')?.addEventListener('submit', (e) => {
+document.getElementById('form-member-edit')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const oldName  = document.getElementById('edit-member-id').value;
     const newName  = document.getElementById('member-full-name').value.trim();
@@ -2454,56 +2566,91 @@ document.getElementById('form-member-edit')?.addEventListener('submit', (e) => {
         state.team.push(targetMember);
     }
 
-    // Sincronizar com delta_users (contas de login)
-    const users = getUsers();
+    // ───── Sincronizar com servidor (delta_users) ─────────────
+    const submitBtn = e.target.querySelector('button[type="submit"]');
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Salvando...'; }
 
-    // Se o e-mail mudou, renomear a entrada antiga
-    if (oldEmail && oldEmail !== newEmail && users[oldEmail]) {
+    try {
+        // Recarrega cache do servidor antes
+        await fetchUsersFromServer();
+        const users = getUsers();
+        let accountAction = null; // 'created' | 'updated' | null
+
         if (newEmail) {
-            users[newEmail] = { ...users[oldEmail], email: newEmail, name: newName, teamMemberName: newName, role: newRole };
+            const accountExists = !!users[newEmail];
+            const oldExists = oldEmail && !!users[oldEmail];
+
+            if (initPwd) {
+                // Nova senha → upsert com hash novo
+                const payload = {
+                    email: newEmail,
+                    name: newName,
+                    role: newRole,
+                    passwordHash: hashPassword(initPwd),
+                    mustChangePassword: mustChg,
+                    teamMemberName: newName
+                };
+                if (oldEmail && oldEmail !== newEmail && oldExists) {
+                    await apiRenameUser(oldEmail, payload);
+                } else {
+                    await apiUpsertUser(payload);
+                }
+                accountAction = accountExists ? 'updated' : 'created';
+            } else if (oldEmail && oldEmail !== newEmail && oldExists) {
+                // Só renomear sem trocar senha
+                const old = users[oldEmail];
+                await apiRenameUser(oldEmail, {
+                    email: newEmail,
+                    name: newName,
+                    role: newRole,
+                    passwordHash: old.passwordHash,
+                    mustChangePassword: mustChg || old.mustChangePassword,
+                    teamMemberName: newName
+                });
+                accountAction = 'updated';
+            } else if (accountExists) {
+                // Só atualizar metadados (sem senha nova)
+                const old = users[newEmail];
+                await apiUpsertUser({
+                    email: newEmail,
+                    name: newName,
+                    role: newRole,
+                    passwordHash: old.passwordHash,
+                    mustChangePassword: mustChg ? true : old.mustChangePassword,
+                    teamMemberName: newName
+                });
+                accountAction = 'updated';
+            }
+            // Se não havia conta e sem senha → não cria nada (membro sem acesso)
+        } else if (oldEmail) {
+            // E-mail removido — apaga a conta de login antiga
+            try { await apiDeleteUser(oldEmail); } catch {}
         }
-        delete users[oldEmail];
+
+        // Refresh do cache local
+        await fetchUsersFromServer();
+
+        localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
+        _pendingMemberPhoto = null;
+        closeMemberModal();
+        renderTeamManagement();
+        renderTeam();
+        initUserSession();
+
+        let msg = `✅ ${newName} salvo.`;
+        if (accountAction === 'created') msg += `\n🔐 Acesso criado para ${newEmail}.`;
+        if (accountAction === 'updated') msg += `\n🔐 Acesso atualizado para ${newEmail}.`;
+        if (newEmail && initPwd && mustChg) msg += `\nUsuário deverá trocar a senha no próximo login.`;
+        alert(msg);
+    } catch (err) {
+        console.error('Erro ao salvar:', err);
+        alert('❌ Erro ao salvar no servidor. Tente novamente.\n\n' + err.message);
+    } finally {
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Gravar Membro'; }
     }
-
-    // Atualizar/criar conta com base no e-mail final
-    if (newEmail) {
-        if (initPwd) {
-            // Nova senha definida: cria ou redefine
-            users[newEmail] = {
-                email: newEmail,
-                name: newName,
-                role: newRole,
-                passwordHash: hashPassword(initPwd),
-                mustChangePassword: mustChg,
-                teamMemberName: newName
-            };
-        } else if (users[newEmail]) {
-            // Sem nova senha: apenas mantém os metadados sincronizados
-            users[newEmail].name = newName;
-            users[newEmail].teamMemberName = newName;
-            users[newEmail].role = newRole;
-            // Se admin alterou a flag mustChangePassword manualmente, respeita
-            users[newEmail].mustChangePassword = mustChg ? true : users[newEmail].mustChangePassword;
-        }
-        // Sem senha definida e sem conta existente: nada a fazer (membro sem acesso)
-    }
-
-    saveUsers(users);
-
-    localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
-    _pendingMemberPhoto = null;
-    closeMemberModal();
-    renderTeamManagement();
-    renderTeam();
-    initUserSession();
-
-    let msg = `✅ ${newName} salvo.`;
-    if (newEmail && initPwd) msg += `\n🔐 Acesso ${oldEmail && users[newEmail] ? 'atualizado' : 'criado'} para ${newEmail}.`;
-    if (newEmail && initPwd && mustChg) msg += `\nUsuário deverá trocar a senha no próximo login.`;
-    alert(msg);
 });
 
-window.deleteMember = (name) => {
+window.deleteMember = async (name) => {
     if (!confirm(`Deseja realmente excluir ${name}?\n\nIsso também removerá o acesso de login deste usuário.`)) return;
 
     const row = document.getElementById(`member-row-${name.replace(/\s/g, '-')}`);
@@ -2511,22 +2658,19 @@ window.deleteMember = (name) => {
         row.classList.add('fade-out-del');
     }
 
+    // Remover do team
+    const m = state.team.find(x => x.name === name);
+    const email = m ? (m.email || '').toLowerCase().trim() : '';
+    state.team = state.team.filter(x => x.name !== name);
+    localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
+
+    // Remover a conta de login no servidor (se houver e-mail)
+    if (email) {
+        try { await apiDeleteUser(email); await fetchUsersFromServer(); }
+        catch (e) { console.warn('Erro ao remover conta de login:', e.message); }
+    }
+
     setTimeout(() => {
-        // Remover do team
-        const m = state.team.find(x => x.name === name);
-        const email = m ? (m.email || '').toLowerCase().trim() : '';
-        state.team = state.team.filter(x => x.name !== name);
-        localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
-
-        // Remover a conta de login associada (se existir)
-        if (email) {
-            const users = getUsers();
-            if (users[email]) {
-                delete users[email];
-                saveUsers(users);
-            }
-        }
-
         renderTeamManagement();
         renderTeam();
         initUserSession();

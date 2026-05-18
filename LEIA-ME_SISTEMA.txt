@@ -1,6 +1,6 @@
 ================================================================================
   DELTA GESTÃO PÚBLICA — DASHBOARD VERTICAL CONTÁBIL
-  Documentação do Sistema | Backup gerado em: 18/05/2026
+  Documentação do Sistema | Backup gerado em: 18/05/2026 (revisão D)
 ================================================================================
 
 VISÃO GERAL
@@ -12,6 +12,80 @@ Rio Grande do Sul) e ao FNDE (Fundo Nacional de Desenvolvimento da Educação).
 
 URL de produção: https://vertical-contabil.vercel.app
 Repositório:     https://github.com/salvagnibruno/verticalContabil
+Versão atual:    v=20260518d (commit 9ef4ddf)
+
+
+================================================================================
+SISTEMA DE LOGIN (NOVO)
+================================================================================
+
+Ao acessar a URL, é exibida uma tela de login obrigatória.
+
+ADMINISTRADOR PADRÃO
+--------------------
+  E-mail:    bruno.ramos@deltainf.com.br
+  Senha:     123
+  Obs:       o sistema exigirá troca de senha no primeiro login
+
+PERFIS DE ACESSO
+----------------
+  ADMIN (Supervisor)
+    - Acesso total ao sistema
+    - Vê os menus "Gestão de Equipe" e "Gestão de Clientes"
+    - Pode criar tarefas/agenda para outros membros da equipe
+    - Pode gerenciar usuários (criar, editar, excluir)
+    - Pode definir senhas de primeiro acesso para qualquer membro
+
+  COLABORADOR
+    - Os menus "Gestão de Equipe" e "Gestão de Clientes" ficam ocultos
+    - Pode criar tarefas/agenda apenas para si mesmo
+    - Não pode delegar tarefas para outros
+
+RESTRIÇÕES DE SESSÃO
+--------------------
+  Após login, o usuário só vê seu próprio perfil no canto superior direito.
+  Não é mais permitido alternar de identidade pela interface — cada usuário
+  acessa apenas seu próprio ambiente. O botão "⏏ Sair" no header encerra a sessão.
+
+DADOS DE LOGIN (localStorage)
+------------------------------
+  delta_users    → mapa { email → { name, role, passwordHash, mustChangePassword, teamMemberName } }
+  delta_session  → sessão ativa { email, ts }
+  Senha armazenada como base64 (uso interno; equivalente a obfuscation simples).
+
+
+================================================================================
+GESTÃO DE EQUIPE — RECURSOS PARA ADMIN
+================================================================================
+
+Em "Gestão de Equipe", o admin pode:
+
+  - Visualizar todos os membros com:
+    · Foto (do upload, do arquivo team_photos/ ou avatar gerado)
+    · Badge Admin/Colaborador
+    · E-mail vinculado ao login
+    · Status do acesso: "✓ Ativo", "⚠ Trocará senha no 1º login" ou "(sem senha)"
+    · Data de admissão, aniversário e ano de nascimento
+
+  - Editar um membro (modal):
+    · 📷 Upload de foto (JPG/PNG, até 5 MB, salvo em base64 no localStorage)
+    · Nome completo
+    · E-mail (login do sistema)
+    · Datas de admissão e nascimento
+    · Marcar como Perfil Administrador (checkbox)
+    · Definir nova senha de primeiro acesso
+    · Marcar "Exigir troca de senha no próximo login"
+
+  - Excluir um membro:
+    · Remove o membro da equipe
+    · Remove automaticamente a conta de login associada (delta_users)
+
+SINCRONIZAÇÃO AUTOMÁTICA
+------------------------
+Ao salvar um membro:
+  - Se o e-mail mudou → a conta de login é renomeada (oldEmail → newEmail)
+  - Se foi marcado como admin → role atualizado em delta_users
+  - Se nova senha foi informada → conta criada/redefinida, exige troca no login
 
 
 ================================================================================
@@ -33,6 +107,31 @@ MÓDULOS DISPONÍVEIS
 
 
 ================================================================================
+GESTÃO DE CLIENTES — CAMPOS DISPONÍVEIS
+================================================================================
+
+Em "Gestão de Clientes", o admin pode editar para cada um dos ~110 municípios:
+
+  - Cód. Órgão   (código do cliente no TCE-RS)
+  - Tipo         (PM = Prefeitura, CM = Câmara)
+  - Nome
+  - Ent. Legais  (checkbox)
+  - Início Leg.  (data de início do contrato legal)
+  - Fim Leg.     (data de fim do contrato legal)
+  - Início Cont. (data de início do contrato comercial)
+  - Fim Cont.    (data de fim do contrato comercial)
+
+Todos os campos de data são sempre editáveis, independente do estado do checkbox.
+
+FILTRO NO DASHBOARD
+-------------------
+"☑ Somente Entregas Legais" — ao lado dos filtros de mês/ano.
+Quando marcado, mostra apenas clientes que:
+  · Têm o checkbox "Ent. Legais" marcado, E
+  · A data de hoje está dentro do período Início Leg. → Fim Leg.
+
+
+================================================================================
 ARQUITETURA TÉCNICA
 ================================================================================
 
@@ -40,12 +139,11 @@ FRONTEND (Cliente)
 ------------------
 Tecnologia: HTML5 + CSS3 + JavaScript puro (sem frameworks)
 Arquivos:
-  - index.html          → Estrutura HTML do dashboard
-  - dashboard_app.js    → Toda a lógica da aplicação (~110 KB)
+  - index.html          → Estrutura HTML do dashboard (~33 KB)
+  - dashboard_app.js    → Toda a lógica da aplicação (~130 KB)
   - dashboard_style.css → Estilos visuais (~24 KB)
-  - logo_delta.png      → Logotipo da empresa
-  - media_logo.png      → Logo alternativo
-  - team_photos/        → Fotos da equipe (bruno, gioliani, hugo, jade, luana, marcus)
+  - logo_delta.png, media_logo.png → Logos da empresa
+  - team_photos/        → Fotos estáticas da equipe (fallback caso não haja upload)
 
 Hospedagem: Vercel (plataforma de deploy frontend/serverless)
 Região:     gru1 (São Paulo, Brasil)
@@ -63,6 +161,12 @@ Dependências:
 
 Hospedagem: Vercel (mesmo projeto, roteia tudo via server/server.js)
 Configuração de deploy: vercel.json (region: gru1, maxDuration: 60s)
+
+CACHE DE NAVEGADOR
+------------------
+O servidor envia headers `Cache-Control: no-cache, no-store, must-revalidate`
+para HTML/JS/CSS, e os assets têm versão `?v=20260518d` no src para garantir
+que mudanças sejam refletidas imediatamente sem precisar de hard refresh.
 
 
 ================================================================================
@@ -159,53 +263,9 @@ CLIENTES MONITORADOS
 O sistema monitora atualmente ~110 entidades municipais do Rio Grande do Sul,
 divididas entre Prefeituras Municipais (PM) e Câmaras Municipais (CM).
 
-Os dados dos clientes (nome, código TCE-RS, código IBGE, tipo) são armazenados
-no próprio arquivo dashboard_app.js (array CLIENTS_DATA) e persistidos no
-localStorage do navegador para edições locais.
-
-Exemplos de clientes:
-  - PM Ametista do Sul    (cód. TCE: 88023)
-  - PM Constantina        (cód. TCE: 45700)
-  - PM Porto Mauá         (cód. TCE: 88050)
-  (e outros ~107 municípios)
-
-
-================================================================================
-EQUIPE / USUÁRIOS DO SISTEMA
-================================================================================
-
-O dashboard possui perfis de usuário gerenciados por localStorage:
-  - Bruno Ramos           (Supervisor / Administrador)
-  - Marcus Sergio de Oliveira
-  - Luana de Matos Clee
-  - Hugo Munareto
-  - Jade Zaira Clavé da Silveira Uchôa de Medeiros
-  - Gioliani (colaborador)
-
-Não há autenticação por senha — o sistema é de uso interno e restrito
-ao ambiente da Delta Gestão Pública.
-
-
-================================================================================
-DEPLOY E INFRAESTRUTURA
-================================================================================
-
-  Plataforma: Vercel (https://vercel.com)
-  Projeto:    vertical-contabil (conta: salvagnibrunos-projects)
-  Região:     gru1 (São Paulo)
-  Configuração: vercel.json
-    - Build: @vercel/node apontando para server/server.js
-    - Todas as rotas redirecionadas para server/server.js
-    - Arquivos estáticos (HTML, CSS, JS, imagens) incluídos no build
-
-  Infraestrutura alternativa (não ativa):
-    - Fly.io: configuração em server/Dockerfile + server/fly.toml
-      App: delta-pad-api, região: gru (São Paulo)
-      (Preparado para deploy caso o Vercel seja inadequado)
-
-  Repositório Git:
-    GitHub: https://github.com/salvagnibruno/verticalContabil
-    Branch: master
+Os dados dos clientes (nome, código TCE-RS, código IBGE, tipo, contratos)
+são armazenados no próprio arquivo dashboard_app.js (array CLIENTS_DATA) e
+persistidos no localStorage do navegador (delta_v2_clients) para edições locais.
 
 
 ================================================================================
@@ -213,8 +273,8 @@ ARQUIVOS DO PROJETO
 ================================================================================
 
   Raiz do projeto:
-    index.html                         → Página principal do dashboard
-    dashboard_app.js                   → Lógica JavaScript (~110 KB)
+    index.html                         → Página principal (com login overlay)
+    dashboard_app.js                   → Lógica JavaScript (~130 KB)
     dashboard_style.css                → Estilos CSS (~24 KB)
     logo_delta.png                     → Logo Delta (26 KB)
     media_logo.png                     → Logo alternativo (293 KB)
@@ -231,8 +291,22 @@ ARQUIVOS DO PROJETO
     fly.toml                           → Configuração Fly.io
 
   Pasta team_photos/:
-    bruno.jpg, gioliani.jpg, hugo.jpg  → Fotos da equipe
+    bruno.jpg, gioliani.jpg, hugo.jpg  → Fotos da equipe (fallback)
     jade.jpg, luana.jpg, marcus.jpg
+
+
+================================================================================
+HISTÓRICO DE MUDANÇAS PRINCIPAIS (esta versão)
+================================================================================
+
+  9ef4ddf — Aplica edição de email/senha/foto na função real (renderTeamManagement)
+  2c13fa1 — Headers no-cache via express.static setHeaders
+  b8e22f0 — Cache bust ?v=20260518c nos assets + headers no vercel.json
+  f36bd0a — Datas sempre editáveis, perfil bloqueado ao login, upload de foto
+  eb2c6d4 — Sincroniza delta_users ao editar e-mail, perfil e nome de membro
+  40e48a8 — Sistema de login, entregas legais e permissões por perfil
+  ef92a17 — Resolve merge mantendo simulação com dados reais Jan/Fev/Mar 2026
+  a649c9e — Fix PAD month match (boundary regex para mes=1 vs mes=11)
 
 
 ================================================================================
@@ -250,19 +324,19 @@ OBSERVAÇÕES TÉCNICAS IMPORTANTES
    dashboard estiver aberto. O servidor possui cache de 30 minutos para
    evitar sobrecarga no TCE-RS.
 
-3. CONSULTA EM LOTE (BATCH)
-   Ao carregar o módulo PAD, o sistema faz uma única requisição POST
-   /api/pad-status-batch enviando todos os ~110 códigos de órgãos de uma
-   vez. O servidor processa em paralelo (até 40 simultâneos por chunk)
-   e retorna todos os status em uma resposta só.
+3. ARMAZENAMENTO DE FOTOS
+   Fotos enviadas pelo admin são salvas em base64 no localStorage
+   (campo m.photoData de cada membro em delta_v2_team). Por isso,
+   se o usuário limpar o cache do navegador, as fotos uploadadas
+   são perdidas. As fotos estáticas em team_photos/*.jpg permanecem.
 
-4. BUG CORRIGIDO (18/05/2026)
-   Corrigido falso positivo na identificação do mês: a busca por "1º mês"
-   poderia incorretamente encontrar "11º mês" (Novembro) por substring
-   match. Corrigido com ancoragem no delimitador HTML ">" da tag.
+4. CACHE BUSTING
+   Os assets são carregados com `?v=20260518d` para garantir reload.
+   Ao fazer mudanças no JS/CSS/HTML, basta atualizar a versão no
+   index.html para forçar todos os browsers a buscar a nova versão.
 
 
 ================================================================================
   Backup gerado por: Claude Sonnet 4.6 (Anthropic)
-  Data: 18/05/2026 | Commit: ef92a17 (branch master)
+  Data: 18/05/2026 | Commit: 9ef4ddf (branch master) | Versão: 20260518d
 ================================================================================

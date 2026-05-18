@@ -10,10 +10,198 @@ const express = require('express');
 const fetch = require('node-fetch');
 const cors = require('cors');
 const path = require('path');
+const fs   = require('fs');
 const app = express();
 const PORT = process.env.PORT || 3131;
 
 app.use(cors());
+app.use(express.json({ limit: '10mb' }));
+
+// =============================================================
+// AUTENTICAÇÃO — armazenamento de usuários em arquivo JSON
+// =============================================================
+
+const USERS_FILE_BUNDLED = path.join(__dirname, 'users.json'); // bundled with deploy (seed)
+const USERS_FILE_WRITABLE = process.env.VERCEL
+    ? '/tmp/users.json'   // Vercel: ephemeral mas pelo menos persiste durante instância warm
+    : path.join(__dirname, 'users.json'); // local: persiste de verdade
+
+function defaultSeed() {
+    return {
+        'bruno.ramos@deltainf.com.br': {
+            email: 'bruno.ramos@deltainf.com.br',
+            name: 'Bruno Ramos',
+            role: 'admin',
+            passwordHash: Buffer.from('123').toString('base64'),
+            mustChangePassword: true,
+            teamMemberName: 'Bruno Ramos'
+        }
+    };
+}
+
+function loadUsers() {
+    // 1) tenta o arquivo writable (mudanças recentes)
+    try {
+        if (fs.existsSync(USERS_FILE_WRITABLE)) {
+            return JSON.parse(fs.readFileSync(USERS_FILE_WRITABLE, 'utf8'));
+        }
+    } catch (e) { console.error('Erro lendo users writable:', e.message); }
+
+    // 2) fallback: arquivo bundled (seed)
+    try {
+        if (fs.existsSync(USERS_FILE_BUNDLED)) {
+            return JSON.parse(fs.readFileSync(USERS_FILE_BUNDLED, 'utf8'));
+        }
+    } catch (e) { console.error('Erro lendo users bundled:', e.message); }
+
+    // 3) seed em memória
+    return defaultSeed();
+}
+
+function saveUsers(users) {
+    try {
+        fs.writeFileSync(USERS_FILE_WRITABLE, JSON.stringify(users, null, 2), 'utf8');
+        return true;
+    } catch (e) {
+        console.error('Erro ao salvar users.json:', e.message);
+        return false;
+    }
+}
+
+function stripPassword(user) {
+    if (!user) return user;
+    const { passwordHash, ...rest } = user;
+    return rest;
+}
+
+// GET /api/auth/users → lista todos os usuários (sem passwordHash)
+app.get('/api/auth/users', (req, res) => {
+    const users = loadUsers();
+    const safe = {};
+    for (const k of Object.keys(users)) safe[k] = stripPassword(users[k]);
+    res.json(safe);
+});
+
+// POST /api/auth/login → valida credenciais
+app.post('/api/auth/login', (req, res) => {
+    const { email, password } = req.body || {};
+    if (!email || !password) return res.status(400).json({ ok: false, error: 'E-mail e senha são obrigatórios.' });
+
+    const users = loadUsers();
+    const user = users[String(email).toLowerCase().trim()];
+    if (!user) return res.json({ ok: false, error: 'E-mail não encontrado.' });
+
+    const inputHash = Buffer.from(password).toString('base64');
+    if (user.passwordHash !== inputHash) return res.json({ ok: false, error: 'Senha incorreta.' });
+
+    res.json({ ok: true, user: stripPassword(user), mustChangePassword: !!user.mustChangePassword });
+});
+
+// POST /api/auth/users/upsert → cria ou atualiza usuário (admin only — checagem no client)
+// Body: { email, name, role, passwordHash?, mustChangePassword?, teamMemberName }
+app.post('/api/auth/users/upsert', (req, res) => {
+    const { email, name, role, passwordHash, mustChangePassword, teamMemberName } = req.body || {};
+    if (!email) return res.status(400).json({ ok: false, error: 'email obrigatório.' });
+
+    const users = loadUsers();
+    const key = String(email).toLowerCase().trim();
+    const existing = users[key] || {};
+    users[key] = {
+        email: key,
+        name: name || existing.name || key,
+        role: role || existing.role || 'colaborador',
+        passwordHash: passwordHash || existing.passwordHash || '',
+        mustChangePassword: typeof mustChangePassword === 'boolean' ? mustChangePassword : (existing.mustChangePassword || false),
+        teamMemberName: teamMemberName || existing.teamMemberName || name || key
+    };
+    if (saveUsers(users)) res.json({ ok: true, user: stripPassword(users[key]) });
+    else res.status(500).json({ ok: false, error: 'Falha ao gravar.' });
+});
+
+// POST /api/auth/users/rename → renomeia chave (e-mail mudou)
+// Body: { oldEmail, newEmail, name, role, passwordHash?, mustChangePassword?, teamMemberName }
+app.post('/api/auth/users/rename', (req, res) => {
+    const { oldEmail, newEmail } = req.body || {};
+    if (!oldEmail || !newEmail) return res.status(400).json({ ok: false });
+
+    const users = loadUsers();
+    const oldKey = String(oldEmail).toLowerCase().trim();
+    const newKey = String(newEmail).toLowerCase().trim();
+    const old = users[oldKey];
+    if (!old) return res.json({ ok: false, error: 'Usuário antigo não encontrado.' });
+
+    delete users[oldKey];
+    users[newKey] = {
+        ...old,
+        email: newKey,
+        name: req.body.name || old.name,
+        role: req.body.role || old.role,
+        passwordHash: req.body.passwordHash || old.passwordHash,
+        mustChangePassword: typeof req.body.mustChangePassword === 'boolean' ? req.body.mustChangePassword : old.mustChangePassword,
+        teamMemberName: req.body.teamMemberName || old.teamMemberName
+    };
+    if (saveUsers(users)) res.json({ ok: true, user: stripPassword(users[newKey]) });
+    else res.status(500).json({ ok: false });
+});
+
+// POST /api/auth/users/delete → remove usuário
+app.post('/api/auth/users/delete', (req, res) => {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ ok: false });
+
+    const users = loadUsers();
+    const key = String(email).toLowerCase().trim();
+    delete users[key];
+    if (saveUsers(users)) res.json({ ok: true });
+    else res.status(500).json({ ok: false });
+});
+
+// POST /api/auth/change-password → troca de senha
+// Body: { email, currentPassword, newPassword }
+app.post('/api/auth/change-password', (req, res) => {
+    const { email, currentPassword, newPassword } = req.body || {};
+    if (!email || !newPassword) return res.status(400).json({ ok: false, error: 'Campos obrigatórios faltando.' });
+
+    const users = loadUsers();
+    const key = String(email).toLowerCase().trim();
+    const user = users[key];
+    if (!user) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
+
+    // Se foi passada senha atual (troca voluntária), valida
+    if (currentPassword !== undefined && currentPassword !== null) {
+        const inputHash = Buffer.from(currentPassword).toString('base64');
+        if (user.passwordHash !== inputHash) return res.json({ ok: false, error: 'Senha atual incorreta.' });
+    }
+
+    user.passwordHash = Buffer.from(newPassword).toString('base64');
+    user.mustChangePassword = false;
+    users[key] = user;
+    if (saveUsers(users)) res.json({ ok: true });
+    else res.status(500).json({ ok: false });
+});
+
+// POST /api/auth/sync → migração one-shot: client envia os users que tem no localStorage
+// e o servidor faz merge (sem sobrescrever existentes com hash vazio)
+app.post('/api/auth/sync', (req, res) => {
+    const { users: clientUsers } = req.body || {};
+    if (!clientUsers || typeof clientUsers !== 'object') return res.status(400).json({ ok: false });
+
+    const users = loadUsers();
+    let added = 0, updated = 0;
+    for (const [email, u] of Object.entries(clientUsers)) {
+        const key = String(email).toLowerCase().trim();
+        if (!u || !u.passwordHash) continue; // ignora entradas sem senha
+        if (!users[key]) {
+            users[key] = u;
+            added++;
+        } else {
+            // Se o servidor já tem, só atualiza se o do cliente é mais recente (heurística simples: mantém o do servidor)
+            // Aqui optamos por NÃO sobrescrever — admin pode editar via /upsert se precisar.
+        }
+    }
+    if (added + updated > 0) saveUsers(users);
+    res.json({ ok: true, added, updated, total: Object.keys(users).length });
+});
 
 // Força no-cache em HTML, JS e CSS para evitar versões desatualizadas no browser
 const noCacheHeaders = (res, filePath) => {
@@ -86,7 +274,7 @@ app.get('/api/pad-status', async (req, res) => {
  * Body: { orgaos: ["88023","45700",...], ano: "2026", mes: 1 }
  * Retorna status de múltiplas entidades de uma vez.
  */
-app.use(express.json());
+// express.json já configurado no topo (10mb)
 app.post('/api/pad-status-batch', async (req, res) => {
     const { orgaos, ano, mes } = req.body;
     if (!orgaos || !ano) {

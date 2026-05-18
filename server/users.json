@@ -1,0 +1,10 @@
+{
+  "bruno.ramos@deltainf.com.br": {
+    "email": "bruno.ramos@deltainf.com.br",
+    "name": "Bruno Ramos",
+    "role": "admin",
+    "passwordHash": "MTIz",
+    "mustChangePassword": true,
+    "teamMemberName": "Bruno Ramos"
+  }
+}
