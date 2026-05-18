@@ -118,13 +118,156 @@ const CLIENTS_RAW = [
 ];
 
 const TEAM_INITIAL = [
-    { name: "Bruno Ramos", birthday: "23/05", year: 1995, isSupervisor: true },
+    { name: "Bruno Ramos", birthday: "23/05", year: 1995, isSupervisor: true, email: "bruno.ramos@deltainf.com.br" },
     { name: "Jade Zaira Clavé da Silveira Uchôa de Medeiros", birthday: "14/05", year: 2001 },
     { name: "Marcus Sergio de Oliveira", birthday: "10/07", year: 1983 },
     { name: "Luana de Matos Clee", birthday: "17/09", year: 1993 },
     { name: "Gioliani Godois", birthday: "07/12", year: 1981 },
     { name: "Hugo Munareto", birthday: "24/08", year: 1977 }
 ];
+
+// ============================================================
+// SISTEMA DE AUTENTICAÇÃO
+// ============================================================
+
+const DEFAULT_ADMIN_EMAIL = 'bruno.ramos@deltainf.com.br';
+
+function getUsers() {
+    const stored = localStorage.getItem('delta_users');
+    if (!stored) {
+        // Seed: admin padrão
+        const users = {
+            [DEFAULT_ADMIN_EMAIL]: {
+                email: DEFAULT_ADMIN_EMAIL,
+                name: 'Bruno Ramos',
+                role: 'admin',
+                passwordHash: btoa('123'),
+                mustChangePassword: true,
+                teamMemberName: 'Bruno Ramos'
+            }
+        };
+        localStorage.setItem('delta_users', JSON.stringify(users));
+        return users;
+    }
+    return JSON.parse(stored);
+}
+
+function saveUsers(users) {
+    localStorage.setItem('delta_users', JSON.stringify(users));
+}
+
+function hashPassword(pwd) { return btoa(pwd); }
+
+function authLogin(email, password) {
+    const users = getUsers();
+    const user = users[email.toLowerCase().trim()];
+    if (!user) return { ok: false, error: 'E-mail não encontrado.' };
+    if (user.passwordHash !== hashPassword(password)) return { ok: false, error: 'Senha incorreta.' };
+    return { ok: true, user };
+}
+
+function getCurrentSession() {
+    const s = localStorage.getItem('delta_session');
+    if (!s) return null;
+    try { return JSON.parse(s); } catch { return null; }
+}
+
+function saveSession(user) {
+    localStorage.setItem('delta_session', JSON.stringify({ email: user.email, ts: Date.now() }));
+}
+
+function clearSession() {
+    localStorage.removeItem('delta_session');
+}
+
+function isAdmin() {
+    return state.loggedInUser && state.loggedInUser.role === 'admin';
+}
+
+let _loginPendingUser = null; // usuário aguardando troca de senha
+
+window.doLogin = function() {
+    const email = (document.getElementById('login-email').value || '').trim();
+    const pwd   = document.getElementById('login-password').value;
+    const errEl = document.getElementById('login-error');
+    errEl.style.display = 'none';
+
+    const result = authLogin(email, pwd);
+    if (!result.ok) {
+        errEl.textContent = result.error;
+        errEl.style.display = 'block';
+        return;
+    }
+
+    if (result.user.mustChangePassword) {
+        _loginPendingUser = result.user;
+        document.getElementById('login-form-area').style.display = 'none';
+        document.getElementById('change-pwd-area').style.display = 'block';
+        return;
+    }
+
+    completeLogin(result.user);
+};
+
+window.doChangePassword = function() {
+    const p1 = document.getElementById('new-pwd-1').value;
+    const p2 = document.getElementById('new-pwd-2').value;
+    const errEl = document.getElementById('change-pwd-error');
+    errEl.style.display = 'none';
+
+    if (p1.length < 4) { errEl.textContent = 'A senha deve ter no mínimo 4 caracteres.'; errEl.style.display = 'block'; return; }
+    if (p1 !== p2)     { errEl.textContent = 'As senhas não coincidem.'; errEl.style.display = 'block'; return; }
+
+    const users = getUsers();
+    users[_loginPendingUser.email].passwordHash = hashPassword(p1);
+    users[_loginPendingUser.email].mustChangePassword = false;
+    saveUsers(users);
+
+    _loginPendingUser.mustChangePassword = false;
+    _loginPendingUser.passwordHash = hashPassword(p1);
+    completeLogin(_loginPendingUser);
+};
+
+function completeLogin(user) {
+    state.loggedInUser = user;
+    saveSession(user);
+
+    // Determina o membro da equipe e supervisor
+    const member = state.team.find(m => m.name === user.teamMemberName || m.name === user.name);
+    state.currentUser = member ? member.name : user.name;
+    state.isSupervisor = user.role === 'admin';
+
+    document.getElementById('login-overlay').style.display = 'none';
+    applyRoleRestrictions();
+    init();
+    applyLegaisFilter();
+}
+
+window.doLogout = function() {
+    if (!confirm('Deseja sair do sistema?')) return;
+    clearSession();
+    state.loggedInUser = null;
+    document.getElementById('login-overlay').style.display = 'flex';
+    document.getElementById('login-form-area').style.display = 'block';
+    document.getElementById('change-pwd-area').style.display = 'none';
+    document.getElementById('login-email').value = '';
+    document.getElementById('login-password').value = '';
+    document.getElementById('login-error').style.display = 'none';
+};
+
+function applyRoleRestrictions() {
+    const admin = isAdmin();
+    // Ocultar menus restritos para não-admin
+    ['team','clientes'].forEach(view => {
+        const btn = document.querySelector(`.side-btn[data-view="${view}"]`);
+        if (btn) btn.style.display = admin ? '' : 'none';
+    });
+}
+
+function applyLegaisFilter() {
+    const cb = document.getElementById('filter-legais-only');
+    if (cb) cb.checked = state.filterLegaisOnly;
+}
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
@@ -170,7 +313,9 @@ let state = {
     currentRequestId: 0, // V7: To prevent race conditions
     // Smooth Animation State
     currentCounts: { onTime: 0, late: 0, pending: 0 },
-    targetCounts: { onTime: 0, late: 0, pending: 0 }
+    targetCounts: { onTime: 0, late: 0, pending: 0 },
+    loggedInUser: null, // { email, name, role: 'admin'|'colaborador', teamMemberName }
+    filterLegaisOnly: false
 };
 
 // V4: Clean wipe of client dates as requested
@@ -230,6 +375,29 @@ const el = {
  * INICIALIZAÇÃO
  */
 function init() {
+    // ── Verificar sessão ──────────────────────────────────────
+    if (!state.loggedInUser) {
+        const session = getCurrentSession();
+        if (session) {
+            const users = getUsers();
+            const user = users[session.email];
+            if (user && !user.mustChangePassword) {
+                state.loggedInUser = user;
+                const member = state.team.find(m => m.name === user.teamMemberName || m.name === user.name);
+                state.currentUser = member ? member.name : user.name;
+                state.isSupervisor = user.role === 'admin';
+                document.getElementById('login-overlay').style.display = 'none';
+            } else {
+                document.getElementById('login-overlay').style.display = 'flex';
+                return; // Aguarda login
+            }
+        } else {
+            document.getElementById('login-overlay').style.display = 'flex';
+            return; // Aguarda login
+        }
+    }
+    // ── Fim verificação sessão ────────────────────────────────
+    applyRoleRestrictions();
     setupFilters();
     setupEventListeners();
     refreshModuleData();
@@ -388,7 +556,10 @@ function setupFilters() {
 
 
 
+let _listenersInitialized = false;
 function setupEventListeners() {
+    if (_listenersInitialized) return;
+    _listenersInitialized = true;
     el.sideBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             if (btn.dataset.module) {
@@ -650,6 +821,25 @@ function renderMembersListView() {
                                     <label style="font-size:0.7rem; color:var(--text-muted);">Data Admissão (DD/MM/AAAA)</label>
                                     <input type="text" value="${m.admissionDate || '01/01/2026'}" placeholder="DD/MM/AAAA" onchange="updateMemberData(${idx}, 'admissionDate', this.value)" ${!state.isSupervisor ? 'disabled' : ''}>
                                 </div>
+                                <div class="form-group" style="margin:0;">
+                                    <label style="font-size:0.7rem; color:var(--text-muted);">E-mail (login)</label>
+                                    <input type="email" value="${m.email || ''}" placeholder="nome@deltainf.com.br" onchange="updateMemberData(${idx}, 'email', this.value)" ${!state.isSupervisor ? 'disabled' : ''}>
+                                </div>
+                                <div class="form-group" style="margin:0;">
+                                    <label style="font-size:0.7rem; color:var(--text-muted);">Perfil de Acesso</label>
+                                    <select onchange="updateMemberData(${idx}, 'role', this.value)" ${!state.isSupervisor ? 'disabled' : ''} style="width:100%; padding:8px; border:1.5px solid #ddd; border-radius:6px; font-family:inherit;">
+                                        <option value="colaborador" ${(m.role||'colaborador')==='colaborador'?'selected':''}>Colaborador</option>
+                                        <option value="admin" ${m.role==='admin'?'selected':''}>Admin</option>
+                                    </select>
+                                </div>
+                                ${state.isSupervisor ? `
+                                <div class="form-group" style="margin:0; grid-column: 1 / -1;">
+                                    <label style="font-size:0.7rem; color:var(--text-muted);">Senha para Primeiro Acesso <span style="color:#888;">(deixe em branco para não alterar)</span></label>
+                                    <div style="display:flex; gap:8px; align-items:center;">
+                                        <input type="text" id="new-pwd-member-${idx}" placeholder="Ex: Delta@2026" style="flex:1;">
+                                        <button onclick="setMemberInitialPassword(${idx})" class="btn-primary" style="white-space:nowrap; padding:8px 14px; font-size:0.8rem;">Definir Senha</button>
+                                    </div>
+                                </div>` : ''}
                             </div>
                         </div>
                         ${state.isSupervisor ? `
@@ -697,16 +887,55 @@ function handleNewMemberSubmit(e) {
         return;
     }
 
-    const newMember = { name, birthday: bday, year, isSupervisor: isSup };
+    const roleNew = (document.getElementById('new-member-role') || {}).value || 'colaborador';
+    const emailNew = ((document.getElementById('new-member-email') || {}).value || '').trim().toLowerCase();
+    const pwdNew   = ((document.getElementById('new-member-initial-pwd') || {}).value || '').trim();
+    const newMember = { name, birthday: bday, year, isSupervisor: isSup, email: emailNew, role: roleNew };
     state.team.push(newMember);
     localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
-    
+
+    if (emailNew && pwdNew) {
+        const users = getUsers();
+        users[emailNew] = {
+            email: emailNew, name, role: roleNew,
+            passwordHash: hashPassword(pwdNew),
+            mustChangePassword: true,
+            teamMemberName: name
+        };
+        saveUsers(users);
+    }
+
     renderTeam();
-    initUserSession(); // Refresh selector
+    initUserSession();
     document.getElementById('modal-member-new').classList.add('hidden');
     e.target.reset();
-    alert(`Novo perfil '${name}' criado e integrado ao sistema!`);
+    alert(`Novo perfil '${name}' criado!${emailNew && pwdNew ? '\nAcesso de login criado para ' + emailNew : ''}`);
 }
+
+window.setMemberInitialPassword = function(idx) {
+    const member = state.team[idx];
+    if (!member) return;
+    const pwdInput = document.getElementById(`new-pwd-member-${idx}`);
+    const pwd = (pwdInput ? pwdInput.value : '').trim();
+    if (!pwd) { alert('Informe uma senha para o primeiro acesso.'); return; }
+    if (!member.email) { alert('Informe o e-mail do membro antes de definir a senha.'); return; }
+
+    const users = getUsers();
+    const email = member.email.toLowerCase().trim();
+    const role  = member.role || 'colaborador';
+
+    users[email] = {
+        email,
+        name: member.name,
+        role,
+        passwordHash: hashPassword(pwd),
+        mustChangePassword: true,
+        teamMemberName: member.name
+    };
+    saveUsers(users);
+    if (pwdInput) pwdInput.value = '';
+    alert(`✅ Acesso criado para ${member.name} (${email}).\nEle deverá trocar a senha no primeiro login.`);
+};
 
 /**
  * SEEDED DETERMINISTIC HASH
@@ -1021,7 +1250,7 @@ async function refreshPADfromServer(reqId) {
     state.clientStatuses = {};
     
     // Filter by Contract End Date (Only if end date is set)
-    const activeClients = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear));
+    const activeClients = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear) && applyLegaisClientFilter(c));
     
     // Ensure animation loop is running toward the new total
     state.targetCounts = { onTime: 0, late: 0, pending: activeClients.length };
@@ -1116,6 +1345,21 @@ function isClientActive(client, month, year) {
     return viewDay <= endDay;
 }
 
+function applyLegaisClientFilter(c) {
+    if (!state.filterLegaisOnly) return true;
+    if (!c.entregasLegais) return false;
+    const today = new Date();
+    if (c.entregasLegaisStart) {
+        const start = new Date(c.entregasLegaisStart);
+        if (today < start) return false;
+    }
+    if (c.entregasLegaisEnd) {
+        const end = new Date(c.entregasLegaisEnd);
+        if (today > end) return false;
+    }
+    return true;
+}
+
 
 function refreshSimulated() {
     const lastDay = new Date(state.selectedYear, state.selectedMonth + 1, 0);
@@ -1125,7 +1369,7 @@ function refreshSimulated() {
     let onTime = 0, late = 0, pending = 0;
     state.clientStatuses = {};
 
-    const activeClients = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear));
+    const activeClients = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear) && applyLegaisClientFilter(c));
 
     activeClients.forEach(c => {
         const status = getSimulatedStatus(c.code, deadline, today);
@@ -1202,7 +1446,7 @@ function updateCountsAndChart(onTime, late, pending, skipSave = false) {
     el.counts.pending.textContent = Math.round(pending);
 
     // V7 Fix: Filter total based on current module
-    const allActive = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear));
+    const allActive = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear) && applyLegaisClientFilter(c));
     const relevantClients = (state.module === 'SIOPE') ? allActive.filter(c => c.type === 'PM' || c.type === 'Pref') : allActive;
     
     const total = relevantClients.length || 1;
@@ -1243,7 +1487,7 @@ function openClientsModal(status) {
     body.innerHTML = '<div id="grouped-clients-container" class="grouped-clients-grid"></div>';
     const container = document.getElementById('grouped-clients-container');
     
-    const allActive = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear));
+    const allActive = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear) && applyLegaisClientFilter(c));
     const groups = [
         { id: 'PM', label: 'PREFEITURAS (PM)', filter: c => c.type === 'PM' || c.type === 'Pref' },
         { id: 'CM', label: 'CÂMARAS (CM)', filter: c => c.type === 'CM' || c.type === 'Cam' },
@@ -2507,16 +2751,33 @@ function renderClientsMgmtTable() {
 
     state.clients.forEach((c, idx) => {
         const row = document.createElement('tr');
+        const hasLegal = !!c.entregasLegais;
         row.innerHTML = `
             <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="code" data-original="${c.code}" style="width:90px; font-weight:bold;"></td>
             <td><input type="text" value="${c.type}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
             <td><input type="text" value="${c.name}" data-idx="${idx}" data-field="name"></td>
+            <td style="text-align:center;">
+                <input type="checkbox" data-idx="${idx}" data-field="entregasLegais" ${hasLegal ? 'checked' : ''} onchange="toggleLegaisRow(${idx}, this.checked)">
+            </td>
+            <td id="legais-start-${idx}" style="${hasLegal ? '' : 'opacity:0.3; pointer-events:none;'}">
+                <input type="date" value="${c.entregasLegaisStart || ''}" data-idx="${idx}" data-field="entregasLegaisStart">
+            </td>
+            <td id="legais-end-${idx}" style="${hasLegal ? '' : 'opacity:0.3; pointer-events:none;'}">
+                <input type="date" value="${c.entregasLegaisEnd || ''}" data-idx="${idx}" data-field="entregasLegaisEnd">
+            </td>
             <td><input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart"></td>
             <td><input type="date" value="${c.contractEnd || ''}" data-idx="${idx}" data-field="contractEnd"></td>
         `;
         tbody.appendChild(row);
     });
 }
+
+window.toggleLegaisRow = function(idx, checked) {
+    const startCell = document.getElementById(`legais-start-${idx}`);
+    const endCell   = document.getElementById(`legais-end-${idx}`);
+    if (startCell) startCell.style.cssText = checked ? '' : 'opacity:0.3; pointer-events:none;';
+    if (endCell)   endCell.style.cssText   = checked ? '' : 'opacity:0.3; pointer-events:none;';
+};
 
 function saveClientsChanges() {
     const inputs = document.querySelectorAll('#clients-mgmt-table input');
@@ -2569,11 +2830,19 @@ function saveClientsChanges() {
         }
     }
 
-    // 2) Aplicar todas as alterações (code, type, name, datas)
-    inputs.forEach(input => {
+    // 2) Aplicar todas as alterações (code, type, name, checkboxes, datas)
+    document.querySelectorAll('#clients-mgmt-table input, #clients-mgmt-table select').forEach(input => {
         const idx = input.dataset.idx;
         const field = input.dataset.field;
-        const value = field === 'code' ? (input.value || '').trim() : input.value;
+        if (!idx || !field) return;
+        let value;
+        if (input.type === 'checkbox') {
+            value = input.checked;
+        } else if (field === 'code') {
+            value = (input.value || '').trim();
+        } else {
+            value = input.value;
+        }
         state.clients[idx][field] = value;
     });
 

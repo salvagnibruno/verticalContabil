@@ -23,6 +23,9 @@
                     <span id="pending-badge-header" class="badge-count hidden">0</span>
                 </div>
 
+                <!-- Logout -->
+                <button onclick="doLogout()" title="Sair do sistema" style="background:rgba(255,255,255,0.15); border:1px solid rgba(255,255,255,0.3); color:#fff; border-radius:8px; padding:6px 12px; cursor:pointer; font-size:0.78rem; font-weight:600; font-family:inherit;">⏏ Sair</button>
+
                 <!-- User Session / Profile -->
                 <div class="profile-area-container">
                     <div class="user-session-area clickable" id="profile-trigger" onclick="toggleProfileMenu()">
@@ -76,6 +79,10 @@
                             <button id="btn-refresh" class="btn-refresh-green">Atualizar</button>
                             <select id="filter-month"></select>
                             <select id="filter-year"></select>
+                            <label style="display:flex; align-items:center; gap:6px; font-size:0.8rem; cursor:pointer; white-space:nowrap;">
+                                <input type="checkbox" id="filter-legais-only" onchange="state.filterLegaisOnly=this.checked; refreshModuleData();">
+                                Somente Entregas Legais
+                            </label>
                         </div>
                     </div>
                     
@@ -186,8 +193,11 @@
                                 <th>Cód. Órgão</th>
                                 <th>Tipo</th>
                                 <th>Nome Cliente</th>
-                                <th>Início Contrato</th>
-                                <th>Fim Contrato</th>
+                                <th>Ent. Legais</th>
+                                <th>Início Leg.</th>
+                                <th>Fim Leg.</th>
+                                <th>Início Cont.</th>
+                                <th>Fim Cont.</th>
                             </tr>
                         </thead>
                             <tbody>
@@ -489,6 +499,21 @@
                         É Supervisor (Administrador)
                     </label>
                 </div>
+                <div class="form-group">
+                    <label>E-mail (login)</label>
+                    <input type="email" id="new-member-email" placeholder="nome@deltainf.com.br">
+                </div>
+                <div class="form-group">
+                    <label>Perfil de Acesso</label>
+                    <select id="new-member-role">
+                        <option value="colaborador">Colaborador</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Senha para Primeiro Acesso</label>
+                    <input type="text" id="new-member-initial-pwd" placeholder="Ex: Delta@2026">
+                </div>
                 <button type="submit" class="btn-primary w-100">Criar Perfil</button>
             </form>
         </div>
@@ -569,6 +594,59 @@
                     <label>Status Atual</label>
                     <div id="detail-task-status-badge" style="display:inline-block;"></div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- LOGIN OVERLAY -->
+    <div id="login-overlay" style="position:fixed; inset:0; background:linear-gradient(135deg,#003580 0%,#005eb8 60%,#0077cc 100%); z-index:9999; display:flex; align-items:center; justify-content:center; font-family:'Montserrat',sans-serif;">
+        <div style="background:#fff; border-radius:16px; padding:40px 36px; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+            <div style="text-align:center; margin-bottom:28px;">
+                <img src="logo_delta.png" alt="Delta" style="height:52px; margin-bottom:12px;">
+                <div style="font-size:0.78rem; color:#666; font-weight:600; letter-spacing:1px; text-transform:uppercase;">Dashboard Vertical Contábil</div>
+            </div>
+
+            <!-- LOGIN FORM -->
+            <div id="login-form-area">
+                <div id="login-error" style="display:none; background:#fde8e8; color:#c0392b; padding:10px 14px; border-radius:8px; font-size:0.82rem; margin-bottom:16px;"></div>
+                <div style="margin-bottom:16px;">
+                    <label style="display:block; font-size:0.75rem; font-weight:600; color:#444; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">E-mail</label>
+                    <input id="login-email" type="email" placeholder="seu@email.com" autocomplete="username"
+                        style="width:100%; padding:11px 14px; border:1.5px solid #ddd; border-radius:8px; font-size:0.9rem; font-family:inherit; outline:none; box-sizing:border-box;"
+                        onkeydown="if(event.key==='Enter') document.getElementById('login-password').focus()">
+                </div>
+                <div style="margin-bottom:22px;">
+                    <label style="display:block; font-size:0.75rem; font-weight:600; color:#444; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.5px;">Senha</label>
+                    <input id="login-password" type="password" placeholder="••••••••" autocomplete="current-password"
+                        style="width:100%; padding:11px 14px; border:1.5px solid #ddd; border-radius:8px; font-size:0.9rem; font-family:inherit; outline:none; box-sizing:border-box;"
+                        onkeydown="if(event.key==='Enter') doLogin()">
+                </div>
+                <button onclick="doLogin()" style="width:100%; padding:13px; background:#005eb8; color:#fff; border:none; border-radius:8px; font-size:0.95rem; font-weight:700; cursor:pointer; font-family:inherit; letter-spacing:0.3px;">
+                    Entrar
+                </button>
+            </div>
+
+            <!-- CHANGE PASSWORD FORM -->
+            <div id="change-pwd-area" style="display:none;">
+                <div style="text-align:center; margin-bottom:18px;">
+                    <div style="font-size:1.2rem; font-weight:700; color:#003580;">🔐 Troca de Senha Obrigatória</div>
+                    <div style="font-size:0.82rem; color:#666; margin-top:6px;">Por segurança, crie uma nova senha para continuar.</div>
+                </div>
+                <div id="change-pwd-error" style="display:none; background:#fde8e8; color:#c0392b; padding:10px 14px; border-radius:8px; font-size:0.82rem; margin-bottom:16px;"></div>
+                <div style="margin-bottom:14px;">
+                    <label style="display:block; font-size:0.75rem; font-weight:600; color:#444; margin-bottom:6px; text-transform:uppercase;">Nova Senha</label>
+                    <input id="new-pwd-1" type="password" placeholder="Mínimo 4 caracteres"
+                        style="width:100%; padding:11px 14px; border:1.5px solid #ddd; border-radius:8px; font-size:0.9rem; font-family:inherit; outline:none; box-sizing:border-box;">
+                </div>
+                <div style="margin-bottom:22px;">
+                    <label style="display:block; font-size:0.75rem; font-weight:600; color:#444; margin-bottom:6px; text-transform:uppercase;">Confirmar Nova Senha</label>
+                    <input id="new-pwd-2" type="password" placeholder="Repita a senha"
+                        style="width:100%; padding:11px 14px; border:1.5px solid #ddd; border-radius:8px; font-size:0.9rem; font-family:inherit; outline:none; box-sizing:border-box;"
+                        onkeydown="if(event.key==='Enter') doChangePassword()">
+                </div>
+                <button onclick="doChangePassword()" style="width:100%; padding:13px; background:#005eb8; color:#fff; border:none; border-radius:8px; font-size:0.95rem; font-weight:700; cursor:pointer; font-family:inherit;">
+                    Salvar Nova Senha e Entrar
+                </button>
             </div>
         </div>
     </div>
