@@ -853,9 +853,59 @@ function renderMembersListView() {
 }
 
 window.updateMemberData = (idx, field, value) => {
-    state.team[idx][field] = value;
+    const member = state.team[idx];
+    if (!member) return;
+
+    if (field === 'email') {
+        // Renomeia a conta em delta_users: old email → new email
+        const oldEmail = (member.email || '').toLowerCase().trim();
+        const newEmail = (value || '').toLowerCase().trim();
+        if (newEmail && oldEmail !== newEmail) {
+            const users = getUsers();
+            if (oldEmail && users[oldEmail]) {
+                // Move conta para o novo e-mail
+                users[newEmail] = { ...users[oldEmail], email: newEmail, teamMemberName: member.name };
+                delete users[oldEmail];
+            } else if (users[newEmail]) {
+                // Novo e-mail já tem conta: só atualiza o vínculo
+                users[newEmail].teamMemberName = member.name;
+            }
+            // (Se não havia conta, não cria — precisa usar "Definir Senha")
+            saveUsers(users);
+        }
+        member.email = newEmail || value;
+
+    } else if (field === 'role') {
+        // Atualiza o perfil também em delta_users
+        member.role = value;
+        const email = (member.email || '').toLowerCase().trim();
+        if (email) {
+            const users = getUsers();
+            if (users[email]) {
+                users[email].role = value;
+                saveUsers(users);
+            }
+        }
+
+    } else if (field === 'name') {
+        // Atualiza o nome também em delta_users (para teamMemberName e name)
+        const email = (member.email || '').toLowerCase().trim();
+        if (email) {
+            const users = getUsers();
+            if (users[email]) {
+                users[email].name = value;
+                users[email].teamMemberName = value;
+                saveUsers(users);
+            }
+        }
+        member.name = value;
+
+    } else {
+        member[field] = value;
+    }
+
     localStorage.setItem('delta_v2_team', JSON.stringify(state.team));
-    renderTeam(); 
+    renderTeam();
 };
 
 window.removeMemberWithFade = (idx) => {
@@ -917,12 +967,13 @@ window.setMemberInitialPassword = function(idx) {
     if (!member) return;
     const pwdInput = document.getElementById(`new-pwd-member-${idx}`);
     const pwd = (pwdInput ? pwdInput.value : '').trim();
-    if (!pwd) { alert('Informe uma senha para o primeiro acesso.'); return; }
+    if (!pwd) { alert('Informe a nova senha de acesso.'); return; }
     if (!member.email) { alert('Informe o e-mail do membro antes de definir a senha.'); return; }
 
     const users = getUsers();
     const email = member.email.toLowerCase().trim();
     const role  = member.role || 'colaborador';
+    const jaExistia = !!users[email];
 
     users[email] = {
         email,
@@ -934,7 +985,8 @@ window.setMemberInitialPassword = function(idx) {
     };
     saveUsers(users);
     if (pwdInput) pwdInput.value = '';
-    alert(`✅ Acesso criado para ${member.name} (${email}).\nEle deverá trocar a senha no primeiro login.`);
+    const acao = jaExistia ? 'atualizado' : 'criado';
+    alert(`✅ Acesso ${acao} para ${member.name} (${email}).\nEle deverá trocar a senha no próximo login.`);
 };
 
 /**
