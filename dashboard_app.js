@@ -18,7 +18,7 @@ const CLIENTS_RAW = [
     { type: 'CM', name: 'Boa Vista do Incra', code: '88053' },
     { type: 'PM', name: 'Bom Jesus', code: '42300', ibge: '430230' },
     { type: 'CM', name: 'Bom Jesus', code: '42301' },
-    { type: 'PM', name: 'Boqueirão do Leão', code: '65300', ibge: '430235' },
+    { type: 'PM', name: 'Boqueirão do Leão', code: '65300', ibge: '430245' },
     { type: 'CM', name: 'Boqueirão do Leão', code: '65301' },
     { type: 'PM', name: 'Campo Bom', code: '43900', ibge: '430390' },
     { type: 'CM', name: 'Campo Bom', code: '43901' },
@@ -129,13 +129,30 @@ const TEAM_INITIAL = [
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
 /**
+ * Default da competência do PAD baseado na data atual:
+ *   - Dia < 6  → 2 meses atrás
+ *   - Dia ≥ 6  → 1 mês atrás
+ * Retorna { month: 0-11, year: YYYY }
+ */
+function computePadDefaultCompetence() {
+    const now = new Date();
+    const offset = now.getDate() < 6 ? 2 : 1;
+    let month = now.getMonth() - offset;
+    let year = now.getFullYear();
+    if (month < 0) { month += 12; year -= 1; }
+    return { month, year };
+}
+
+const __padDefault = computePadDefaultCompetence();
+
+/**
  * ESTADO DA APLICAÇÃO
  */
 let state = {
     module: 'PAD',
     view: 'dashboard',
-    selectedMonth: 1, // 0-indexed
-    selectedYear: 2026,
+    selectedMonth: __padDefault.month, // 0-indexed; recalculado a cada carga conforme regra do dia 5
+    selectedYear: __padDefault.year,
     calendarDate: new Date(2026, 3, 1),
     currentUser: localStorage.getItem(window.IS_COLABORADOR ? 'delta_currentUser_colab' : 'delta_currentUser_admin') || (window.IS_COLABORADOR ? "Jade Zaira Clavé da Silveira Uchôa de Medeiros" : "Bruno Ramos"),
     isSupervisor: false, // Will be set in init based on currentUser
@@ -148,7 +165,7 @@ let state = {
     clientStatuses: {},
     clients: JSON.parse(localStorage.getItem('delta_v2_clients')) || [...CLIENTS_RAW],
     lastRefresh: 0, // V6: Last update timestamp
-    refreshInterval: 300000, // V6: 5 minutes in ms
+    refreshInterval: 600000, // 10 minutes in ms
     dataCache: {}, // V7: { 'MODULE_MONTH_YEAR': { ts: Date, statuses: {}, counts: {} } }
     currentRequestId: 0, // V7: To prevent race conditions
     // Smooth Animation State
@@ -164,14 +181,14 @@ if (!localStorage.getItem('delta_v4_clients_reset')) {
 }
 
 // V8: Sync IBGE codes into existing localStorage clients
-if (!localStorage.getItem('delta_v8_ibge_sync')) {
+if (!localStorage.getItem('delta_v9_ibge_sync')) {
     state.clients = state.clients.map(c => {
         const raw = CLIENTS_RAW.find(r => r.code === c.code);
         if (raw && raw.ibge) return { ...c, ibge: raw.ibge };
         return c;
     });
     localStorage.setItem('delta_v2_clients', JSON.stringify(state.clients));
-    localStorage.setItem('delta_v8_ibge_sync', 'true');
+    localStorage.setItem('delta_v9_ibge_sync', 'true');
 }
 
 // Sync across tabs
@@ -244,9 +261,9 @@ function init() {
     // Periodic Notification Check
     setInterval(checkSystemNotifications, 5000);
     
-    // V6: Automatic Data Refresh every 5 minutes
+    // Automatic Data Refresh every 10 minutes
     setInterval(() => {
-        console.log("Sistema Delta: Atualização automática de 5 minutos.");
+        console.log("Sistema Delta: Atualização automática de 10 minutos.");
         refreshModuleData(true); 
     }, state.refreshInterval);
     
@@ -349,10 +366,18 @@ function setupFilters() {
     // Derive default month/year ONLY if absolutely empty
     if (state.selectedMonth === undefined || state.selectedMonth === null || state.selectedMonth === -1) {
         const now = new Date();
-        const day = now.getDate();
-        let defaultMonth = now.getMonth() - (day <= 5 ? 2 : 1);
-        let defaultYear = now.getFullYear();
-        if (defaultMonth < 0) { defaultMonth += 12; defaultYear -= 1; }
+        let defaultMonth, defaultYear = now.getFullYear();
+        if (state.module === 'SIOPE' || state.module === 'SIOPS') {
+            // Last completed bimester: current bimester index minus 1
+            // Bimester index = Math.floor(month / 2): Jan-Feb=0, Mar-Apr=1, May-Jun=2, ...
+            const currentBim = Math.floor(now.getMonth() / 2);
+            defaultMonth = currentBim - 1;
+            if (defaultMonth < 0) { defaultMonth += 6; defaultYear -= 1; }
+        } else {
+            const def = computePadDefaultCompetence();
+            defaultMonth = def.month;
+            defaultYear = def.year;
+        }
         state.selectedMonth = defaultMonth;
         state.selectedYear = defaultYear;
     }
@@ -367,6 +392,11 @@ function setupEventListeners() {
     el.sideBtns.forEach(btn => {
         btn.addEventListener('click', () => {
             if (btn.dataset.module) {
+                const newIsBimester = btn.dataset.module === 'SIOPE' || btn.dataset.module === 'SIOPS';
+                const prevIsBimester = state.module === 'SIOPE' || state.module === 'SIOPS';
+                if (newIsBimester && !prevIsBimester) {
+                    state.selectedMonth = -1; // Force correct bimester default when entering SIOPE/SIOPS
+                }
                 state.module = btn.dataset.module;
                 state.view = 'dashboard';
                 setupFilters(); // Refresh filter labels/options for SIOPE
@@ -462,11 +492,9 @@ function returnToHome() {
     state.view = 'dashboard';
     updateActiveNav(document.querySelector('.side-btn[data-module="PAD"]'));
     
-    const today = new Date();
-    let defMonth = today.getMonth() - 1;
-    if (today.getDate() <= 5) defMonth--;
-    state.selectedMonth = (defMonth < 0) ? defMonth + 12 : defMonth;
-    state.selectedYear = (defMonth < 0) ? today.getFullYear() - 1 : today.getFullYear();
+    const def = computePadDefaultCompetence();
+    state.selectedMonth = def.month;
+    state.selectedYear = def.year;
     
     if (el.filterMonth) el.filterMonth.value = state.selectedMonth;
     if (el.filterYear) el.filterYear.value = state.selectedYear;
@@ -696,22 +724,16 @@ function seededHash(str) {
 }
 
 // URL dinâmica: Vercel e acesso local usam o mesmo origin; arquivo local usa localhost
-const SERVER_URL = (() => {
-    const origin = window.location.origin;
-    if (!origin || origin === 'null' || origin.startsWith('file')) {
-        return 'http://localhost:3131';
-    }
-    return origin;
-})();
+// SERVER_URL: tenta localhost primeiro (Chrome permite HTTP localhost a partir de HTTPS).
+// Se local não responder, usa a origem atual (Vercel) como fallback.
+let SERVER_URL = 'http://localhost:3131';
+let serverAvailable = null;
 
-let serverAvailable = null; // null = not checked yet
-
-// Helper: fetch com timeout compatível com todos os browsers (sem AbortSignal.timeout)
+// Helper: fetch com timeout compatível com todos os browsers
 async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-        // Header Bypass-Tunnel-Reminder: ignora o desafio do LocalTunnel
         const headers = { 'Bypass-Tunnel-Reminder': 'true', ...(options.headers || {}) };
         const response = await fetch(url, { ...options, signal: controller.signal, headers });
         return response;
@@ -720,26 +742,43 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 12000) {
     }
 }
 
-// Verifica se o servidor está online (com até 3 tentativas)
+// Verifica servidores: tenta localhost primeiro, depois Vercel como fallback
 async function checkServer() {
     if (serverAvailable === true) return true;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            const r = await fetchWithTimeout(`${SERVER_URL}/api/health`, { cache: 'no-store' }, 12000);
-            if (r.ok) {
-                serverAvailable = true;
-                console.log(`Delta Server: Online ✅ (tentativa ${attempt})`);
-                return true;
+    // 1. Tenta servidor local (acessa TCE-RS sem bloqueio de IP)
+    try {
+        const r = await fetchWithTimeout('http://localhost:3131/api/health', { cache: 'no-store' }, 4000);
+        if (r.ok) {
+            SERVER_URL = 'http://localhost:3131';
+            serverAvailable = true;
+            console.log('Delta Server: Servidor LOCAL online ✅');
+            return true;
+        }
+    } catch (e) {
+        console.warn('Delta Server: Localhost indisponível →', e.message);
+    }
+
+    // 2. Tenta servidor Vercel como fallback
+    const remoteOrigin = window.location.origin;
+    if (remoteOrigin && !remoteOrigin.startsWith('file') && remoteOrigin !== 'null') {
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const r = await fetchWithTimeout(`${remoteOrigin}/api/health`, { cache: 'no-store' }, 8000);
+                if (r.ok) {
+                    SERVER_URL = remoteOrigin;
+                    serverAvailable = true;
+                    console.log('Delta Server: Servidor VERCEL online ✅');
+                    return true;
+                }
+            } catch (e) {
+                if (attempt < 2) await new Promise(r => setTimeout(r, 1500));
             }
-        } catch (e) {
-            console.warn(`Delta Server: Tentativa ${attempt}/3 falhou →`, e.message);
-            if (attempt < 3) await new Promise(r => setTimeout(r, 2000)); // espera 2s entre tentativas
         }
     }
 
-    console.error('Delta Server: Servidor não respondeu após 3 tentativas.');
     serverAvailable = false;
+    console.error('Delta Server: Nenhum servidor disponível.');
     return false;
 }
 
@@ -791,7 +830,7 @@ async function refreshModuleData(isAuto = false, isForce = false) {
     hideLoadingStatus(); // Clear any previous status message
 
     if (state.module === 'SIOPE') {
-        processSIOPELogic(cacheKey);
+        await processSIOPELogic(cacheKey);
         return;
     }
 
@@ -816,45 +855,76 @@ function updateDeadlineInfo() {
     el.deadlineInfo.innerHTML = `📅 Prazo Final ${state.module} (${MONTHS[state.selectedMonth]}): <strong>${deadline.toLocaleDateString('pt-BR')}</strong>`;
 }
 
-function processSIOPELogic(cacheKey) {
+async function processSIOPELogic(cacheKey) {
     const today = new Date();
     const bimNum = state.selectedMonth + 1; // 1 to 6
-    
     const endMonths = [1, 3, 5, 7, 9, 11];
     const bimEndDate = new Date(state.selectedYear, endMonths[state.selectedMonth] + 1, 0);
-    const deadline = new Date(bimEndDate.getFullYear(), bimEndDate.getMonth(), bimEndDate.getDate() + 30);
-    
+
     updateSIOPEDeadline();
 
     const pmClients = state.clients.filter(c => c.type === 'PM' || c.type === 'Pref');
-    const statuses = {};
-    
-    // Chronological Logic requested by user:
-    // If bimestre hasn't even finished yet -> All Pending (Não Disponível)
-    // If finished but deadline hasn't passed -> Real simulation/status
-    // If past and expired -> Real simulation/status
-    
-    pmClients.forEach(c => {
-        if (today < bimEndDate) {
-            statuses[c.code] = 'pending'; // In progress
-        } else {
-            const seed = seededHash(c.code + state.selectedMonth + state.selectedYear);
-            if (seed > 0.4) statuses[c.code] = 'on-time';
-            else if (today > deadline && seed > 0.15) statuses[c.code] = 'late';
-            else statuses[c.code] = 'pending';
+
+    // Bimestre not finished yet: all pending
+    if (today <= bimEndDate) {
+        const statuses = {};
+        pmClients.forEach(c => { statuses[c.code] = 'pending'; });
+        state.clientStatuses = statuses;
+        state.targetCounts = { onTime: 0, late: 0, pending: pmClients.length };
+        state.dataCache[cacheKey] = { ts: Date.now(), statuses: {...statuses}, counts: {...state.targetCounts} };
+        hideLoadingStatus();
+        startAnimationLoop();
+        return;
+    }
+
+    // Show loading while querying FNDE
+    const statusEl = document.getElementById('loading-status');
+    if (statusEl) {
+        statusEl.textContent = 'Consultando FNDE...';
+        statusEl.style.display = 'block';
+        statusEl.className = 'status-msg status-loading';
+    }
+
+    try {
+        const ibges = pmClients.map(c => c.ibge).filter(Boolean);
+        const response = await fetchWithTimeout(`${SERVER_URL}/api/siope-status-batch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ibges, bimestre: bimNum, ano: state.selectedYear })
+        }, 30000);
+
+        if (!response.ok) throw new Error(`SIOPE server ${response.status}`);
+        const data = await response.json();
+
+        const statuses = {};
+        pmClients.forEach(c => {
+            const r = c.ibge ? data[c.ibge] : null;
+            statuses[c.code] = r ? r.status : 'pending';
+        });
+
+        state.clientStatuses = statuses;
+        let onTime = 0, late = 0, pending = 0;
+        Object.values(statuses).forEach(s => {
+            if (s === 'on-time') onTime++;
+            else if (s === 'late') late++;
+            else pending++;
+        });
+
+        state.targetCounts = { onTime, late, pending };
+        state.dataCache[cacheKey] = { ts: Date.now(), statuses: {...statuses}, counts: {...state.targetCounts} };
+
+    } catch (e) {
+        // On failure mark all pending
+        const statuses = {};
+        pmClients.forEach(c => { statuses[c.code] = 'pending'; });
+        state.clientStatuses = statuses;
+        state.targetCounts = { onTime: 0, late: 0, pending: pmClients.length };
+        if (statusEl) {
+            statusEl.textContent = '⚠️ Falha ao consultar FNDE';
+            statusEl.className = 'status-msg';
         }
-    });
+    }
 
-    state.clientStatuses = statuses;
-    let onTime = 0, late = 0, pending = 0;
-    Object.values(statuses).forEach(s => {
-        if (s === 'on-time') onTime++;
-        else if (s === 'late') late++;
-        else pending++;
-    });
-
-    state.targetCounts = { onTime, late, pending };
-    state.dataCache[cacheKey] = { ts: Date.now(), statuses: {...statuses}, counts: {...state.targetCounts} };
     hideLoadingStatus();
     startAnimationLoop();
 }
@@ -874,7 +944,7 @@ function updateSIOPEDeadline() {
     const bimEndDate = new Date(state.selectedYear, endMonths[state.selectedMonth] + 1, 0);
     const deadline = new Date(bimEndDate.getFullYear(), bimEndDate.getMonth(), bimEndDate.getDate() + 30);
     const bimLabel = `${bimNum}º Bimestre`;
-    const siopeLink = "https://www.fnde.gov.br/siope/recibosTransmissao.do?tipoDeRecibo=1&cod_uf=12&cod_uf_mun=43&municipios=432132&consultar=Consultar";
+    const siopeLink = "https://www.fnde.gov.br/siope/recibosTransmissao.do?tipoDeRecibo=1&cod_uf_mun=43&consultar=Consultar";
     el.deadlineInfo.innerHTML = `📅 Monitoramento SIOPE | ${bimLabel} / ${state.selectedYear} | Foco: Prefeituras (PM) <a href="${siopeLink}" target="_blank" style="color:var(--secondary-blue); text-decoration:underline; margin-left:10px;">Consulte no FNDE</a>`;
 }
 
@@ -957,7 +1027,7 @@ async function refreshPADfromServer(reqId) {
     state.targetCounts = { onTime: 0, late: 0, pending: activeClients.length };
     startAnimationLoop();
 
-    const chunkSize = 15; 
+    const chunkSize = 5; // Limita concorrência para não sobrecarregar o TCE-RS
     for (let i = 0; i < activeClients.length; i += chunkSize) {
         // V7 Race Protection: Check if this request is still the latest
         if (reqId !== state.currentRequestId) return;
@@ -1070,11 +1140,28 @@ function refreshSimulated() {
 }
 
 function getSimulatedStatus(code, deadline, today) {
-    // Current rule: if no start date, internal default 01/01/1950 (already active)
-    
-    // Meses Futuros (prazo não vencido): Mostrar 'pendente' apenas de ABRIL em diante
-    if (deadline > today && state.selectedMonth > 2) return 'pending';
-    // Past months: deterministic hash
+    // Dados reais conhecidos — usados como simulação quando servidor indisponível
+    if (state.selectedYear === 2026 && state.selectedMonth === 1) {
+        // Fevereiro/2026: 106 no prazo, 3 atrasados, 1 não enviado
+        if (code === '45700') return 'pending'; // PM Constantina
+        if (['41201','88021','88050'].includes(code)) return 'late';
+        return 'on-time';
+    }
+    if (state.selectedYear === 2026 && state.selectedMonth === 2) {
+        // Março/2026: 108 no prazo, 1 atrasado, 1 não enviado (PM Constantina)
+        if (code === '45700') return 'pending'; // PM Constantina
+        if (code === '41201') return 'late';    // único atrasado em março
+        return 'on-time';
+    }
+    if (state.selectedYear === 2026 && state.selectedMonth === 3) {
+        // Abril/2026: 10 no prazo (prazo ainda não vencido), ~100 pendentes
+        // Usa hash determinístico: ~9% = on-time para refletir os 10 enviados
+        const seed = seededHash(code + '3' + '2026');
+        return (seed > 0.91) ? 'on-time' : 'pending';
+    }
+    // Meses futuros sem dados conhecidos
+    if (deadline > today) return 'pending';
+    // Meses passados: hash determinístico
     const seed = seededHash(code + state.selectedMonth + state.selectedYear);
     return (seed > 0.35) ? 'on-time' : (seed > 0.12) ? 'late' : 'pending';
 }
@@ -2417,12 +2504,11 @@ function renderClientsMgmtTable() {
     const tbody = document.querySelector('#clients-mgmt-table tbody');
     if (!tbody) return;
     tbody.innerHTML = '';
-    
+
     state.clients.forEach((c, idx) => {
         const row = document.createElement('tr');
         row.innerHTML = `
-            
-            <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="code" style="width:60px;"></td>
+            <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="code" data-original="${c.code}" style="width:90px; font-weight:bold;"></td>
             <td><input type="text" value="${c.type}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
             <td><input type="text" value="${c.name}" data-idx="${idx}" data-field="name"></td>
             <td><input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart"></td>
@@ -2434,13 +2520,65 @@ function renderClientsMgmtTable() {
 
 function saveClientsChanges() {
     const inputs = document.querySelectorAll('#clients-mgmt-table input');
+
+    // 1) Detectar alterações de "Cód. Órgão" e exigir confirmação explícita
+    const codeChanges = [];
+    inputs.forEach(input => {
+        if (input.dataset.field !== 'code') return;
+        const original = (input.dataset.original || '').trim();
+        const current = (input.value || '').trim();
+        if (original !== current) {
+            const idx = parseInt(input.dataset.idx, 10);
+            const clientName = state.clients[idx] ? state.clients[idx].name : '(sem nome)';
+            codeChanges.push({ idx, original, current, clientName, input });
+        }
+    });
+
+    if (codeChanges.length > 0) {
+        // Validação 1: códigos não podem ficar vazios
+        const vazios = codeChanges.filter(c => !c.current);
+        if (vazios.length > 0) {
+            alert('❌ O Cód. Órgão não pode ficar vazio. Verifique os clientes:\n\n' +
+                  vazios.map(c => `• ${c.clientName}`).join('\n'));
+            return;
+        }
+
+        // Validação 2: detectar duplicidade entre todos os códigos (alterados + não alterados)
+        const allCodes = Array.from(inputs)
+            .filter(i => i.dataset.field === 'code')
+            .map(i => (i.value || '').trim());
+        const duplicados = allCodes.filter((c, i) => c && allCodes.indexOf(c) !== i);
+        if (duplicados.length > 0) {
+            alert('❌ Existem Cód. Órgão duplicados: ' + [...new Set(duplicados)].join(', ') +
+                  '\nCada cliente deve ter um código único.');
+            return;
+        }
+
+        // Confirmação explícita: lista cada alteração
+        const resumo = codeChanges
+            .map(c => `• ${c.clientName}: ${c.original} → ${c.current}`)
+            .join('\n');
+        const confirmou = confirm(
+            `⚠️ ATENÇÃO: você está alterando o Cód. Órgão de ${codeChanges.length} cliente(s):\n\n` +
+            `${resumo}\n\n` +
+            `Essa mudança afeta a consulta ao TCE-RS. Confirma a gravação?`
+        );
+        if (!confirmou) {
+            alert('Alterações de Cód. Órgão canceladas. Nenhum dado foi gravado.');
+            return;
+        }
+    }
+
+    // 2) Aplicar todas as alterações (code, type, name, datas)
     inputs.forEach(input => {
         const idx = input.dataset.idx;
         const field = input.dataset.field;
-        state.clients[idx][field] = input.value;
+        const value = field === 'code' ? (input.value || '').trim() : input.value;
+        state.clients[idx][field] = value;
     });
-    
+
     localStorage.setItem('delta_v2_clients', JSON.stringify(state.clients));
     alert('✅ Clientes salvos com sucesso!');
+    renderClientsMgmtTable(); // re-renderiza para atualizar data-original dos códigos
     refreshModuleData();
 }

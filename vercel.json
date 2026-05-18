@@ -1,5 +1,6 @@
 {
   "version": 2,
+  "regions": ["gru1"],
   "builds": [
     {
       "src": "server/server.js",
@@ -12,7 +13,8 @@
           "logo_delta.png",
           "media_logo.png",
           "team_photos/**"
-        ]
+        ],
+        "maxDuration": 60
       }
     }
   ],
