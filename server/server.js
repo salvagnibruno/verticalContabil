@@ -25,8 +25,10 @@ app.use(express.json({ limit: '10mb' }));
 // Sem KV: cai pro arquivo /tmp (Vercel efêmero) ou bundled (local).
 // =============================================================
 
-const KV_URL   = process.env.KV_REST_API_URL;
-const KV_TOKEN = process.env.KV_REST_API_TOKEN;
+// Aceita tanto KV_REST_API_* (Vercel KV legado) quanto UPSTASH_REDIS_REST_*
+// (Upstash via Marketplace — atual padrão do Vercel). O conteúdo da REST API é idêntico.
+const KV_URL   = process.env.KV_REST_API_URL   || process.env.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 const KV_ENABLED = !!(KV_URL && KV_TOKEN);
 
 async function kvGet(key) {
