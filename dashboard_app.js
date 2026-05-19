@@ -252,7 +252,10 @@ async function pushLegaisToServer(clients) {
     } catch (e) { return false; }
 }
 
-// Aplica o mapa do servidor SEM substituir objetos — só atualiza os 3 campos
+// Aplica o mapa do servidor SEM substituir objetos — só atualiza os 3 campos.
+// IMPORTANTE: usado APENAS em sync manual (botão "Atualizar do servidor"),
+// nunca no init() automático — evita corromper o state.clients antes da
+// consulta PAD com snapshot velho do KV.
 function applyLegaisFromServer(legaisMap) {
     if (!legaisMap || typeof legaisMap !== 'object') return;
     state.clients.forEach(c => {
@@ -265,6 +268,33 @@ function applyLegaisFromServer(legaisMap) {
         }
     });
 }
+
+// Botão "Atualizar do servidor" — sincronização manual e controlada
+window.syncLegaisFromServerManual = async function() {
+    const btn = document.getElementById('btn-sync-legais');
+    const original = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Buscando...'; }
+    try {
+        const legaisMap = await fetchLegaisFromServer();
+        if (!legaisMap) {
+            alert('ℹ️ Nenhuma marcação de Entregas Legais encontrada no servidor.');
+            return;
+        }
+        const count = Object.keys(legaisMap).filter(k => legaisMap[k].entregasLegais).length;
+        if (!confirm(`Foram encontradas ${count} marcação(ões) de Entregas Legais no servidor.\n\nAplicar essas marcações sobre os dados locais? (apenas os flags entregasLegais e as datas serão atualizados)`)) {
+            return;
+        }
+        applyLegaisFromServer(legaisMap);
+        localStorage.setItem('delta_v2_clients', JSON.stringify(state.clients));
+        renderClientsMgmtTable();
+        refreshModuleData(false, true); // força reconsulta com os flags atualizados
+        alert('✅ Marcações atualizadas a partir do servidor.');
+    } catch (e) {
+        alert('❌ Falha ao buscar do servidor: ' + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = original; }
+    }
+};
 
 function hashPassword(pwd) { return btoa(pwd); }
 
@@ -535,16 +565,11 @@ async function init() {
     // ── Sincronizar usuários do servidor ─────────────────────
     await fetchUsersFromServer();
 
-    // ── Sincronizar APENAS as marcações de Entregas Legais via servidor ──
-    // Não substitui state.clients — apenas atualiza os 3 campos. ibge,
-    // contractStart/End, nome e tipo continuam vindo do CLIENTS_RAW.
-    try {
-        const legaisMap = await fetchLegaisFromServer();
-        if (legaisMap) {
-            applyLegaisFromServer(legaisMap);
-            localStorage.setItem('delta_v2_clients', JSON.stringify(state.clients));
-        }
-    } catch (e) { /* sem KV / sem servidor: mantém localStorage */ }
+    // NOTA: o auto-fetch de Entregas Legais foi REMOVIDO desta inicialização
+    // para garantir que a consulta PAD use exclusivamente o state.clients local
+    // (que tem ibge + flags atualizados via localStorage). A sincronização com
+    // o servidor agora é EXPLÍCITA, via botão "Atualizar do servidor" em
+    // Gestão de Clientes — controlada pelo admin, nunca automática no boot.
 
     // ── Migração one-shot: enviar usuários antigos do localStorage para o servidor ──
     // (executa apenas uma vez por browser, para não perder contas criadas antes do servidor)

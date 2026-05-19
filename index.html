@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Delta Gestão Pública | Dashboard Vertical Contábil</title>
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="dashboard_style.css?v=20260518m">
+    <link rel="stylesheet" href="dashboard_style.css?v=20260519a">
 </head>
 <body class="dashboard-body">
     <!-- Header with Official Logo -->
@@ -199,7 +199,12 @@
                 <section class="card fade-in">
                     <div class="card-header">
                         <h2>📊 Gerenciamento de Clientes (Supervisor)</h2>
-                        <div style="display:flex; align-items:center; gap:8px; font-size:0.85rem;">
+                        <div style="display:flex; align-items:center; gap:10px; font-size:0.85rem; flex-wrap:wrap;">
+                            <button id="btn-sync-legais" onclick="syncLegaisFromServerManual()"
+                                    title="Buscar marcações de Entregas Legais do servidor (para sincronizar com colaboradores)"
+                                    style="padding:6px 12px; border:1px solid #005eb8; background:#fff; color:#005eb8; border-radius:6px; cursor:pointer; font-family:inherit; font-size:0.82rem; font-weight:600;">
+                                🔄 Atualizar do servidor
+                            </button>
                             <label for="clients-type-filter" style="font-weight:600; color:#005eb8;">Tipo:</label>
                             <select id="clients-type-filter" onchange="onClientsTypeFilterChange(this.value)"
                                     style="padding:6px 10px; border:1px solid #ddd; border-radius:6px; font-family:inherit; font-size:0.85rem;">
@@ -697,6 +702,6 @@
     </div>
 
     <script>window.IS_COLABORADOR = false;</script>
-    <script src="dashboard_app.js?v=20260518m"></script>
+    <script src="dashboard_app.js?v=20260519a"></script>
 </body>
 </html>
