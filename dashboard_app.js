@@ -483,7 +483,7 @@ let state = {
     view: 'dashboard',
     selectedMonth: __padDefault.month, // 0-indexed; recalculado a cada carga conforme regra do dia 5
     selectedYear: __padDefault.year,
-    calendarDate: new Date(2026, 3, 1),
+    calendarDate: new Date(),
     currentUser: localStorage.getItem(window.IS_COLABORADOR ? 'delta_currentUser_colab' : 'delta_currentUser_admin') || (window.IS_COLABORADOR ? "Jade Zaira Clavé da Silveira Uchôa de Medeiros" : "Bruno Ramos"),
     isSupervisor: false, // Will be set in init based on currentUser
     appointments: JSON.parse(localStorage.getItem('delta_v2_appointments')) || [],
@@ -641,7 +641,10 @@ async function init() {
     
     // Member Creation Event
     const btnAddMember = document.getElementById('btn-add-member');
-    if (btnAddMember) btnAddMember.onclick = () => document.getElementById('modal-member-new').classList.remove('hidden');
+    if (btnAddMember) btnAddMember.onclick = () => {
+        document.getElementById('modal-member-new').classList.remove('hidden');
+        setTimeout(() => document.getElementById('new-member-name')?.focus(), 50);
+    };
     const formNewMember = document.getElementById('form-new-member');
     if (formNewMember) formNewMember.onsubmit = handleNewMemberSubmit;
 
@@ -2627,6 +2630,7 @@ window.openMemberModal = (memberName = null) => {
     }
 
     modal.classList.remove('hidden');
+    setTimeout(() => document.getElementById('member-full-name')?.focus(), 50);
 };
 
 window.closeMemberModal = () => {

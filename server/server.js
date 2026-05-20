@@ -421,44 +421,44 @@ function parsePadStatus(html, orgao, ano, mes) {
                  sentDate: null, consultedAt: new Date().toISOString(), hasAnySent: hasAny };
     }
 
-    // Ancora no ">" antes do número para evitar que mes=1 case com "11" ou "12"
-    // Ex: ">1&ordm; m&ecirc;s/2026<" NÃO ocorre dentro de ">11&ordm; m&ecirc;s/2026<"
-    const patEncoded = `>${mes}&ordm; m&ecirc;s/${ano}<`;
-    const patPlain   = `>${mes}º mês/${ano}<`;
+    // Regex ancorada em ">" antes do número evita falso positivo com "11"/"12";
+    // aceita zero à esquerda ("01º") e diferentes encodings do ordinal/ê.
+    const reMes = new RegExp(
+        `>\\s*0?${mes}(?:&ordm;|&amp;ordm;|[º°]|&#(?:186|xba|ord);?)\\s*m(?:&ecirc;|ê)s\\s*\\/\\s*${ano}\\s*<`,
+        'i'
+    );
     const rows = padSection.split(/<tr[^>]*>/i);
 
     let rowFound = false;
     let sentDateStr = null;
 
     for (const row of rows) {
-        if (!row.includes(patEncoded) && !row.includes(patPlain)) continue;
+        if (!reMes.test(row)) continue;
         rowFound = true;
         // Extrai "Data de Conclusão" (3ª coluna <td>, índice 3 após split)
         const cols = row.split(/<td[^>]*>/i);
         if (cols.length >= 4) {
             const dateText = cols[3].split('</td>')[0].trim();
             if (dateText.match(/\d{2}\/\d{2}\/\d{4}/)) {
-                sentDateStr = dateText; // mantém a última data encontrada
+                sentDateStr = dateText;
             }
         }
         break; // uma linha por mês é suficiente
     }
 
-    if (!rowFound) {
-        return { orgao, ano, mes, status: 'pending', sentDate: null,
+    // Nova regra: só conta como enviado se a linha do mês existe E tem Data de
+    // Conclusão preenchida. Linha sem Data de Conclusão = entrega em andamento → pending.
+    if (!rowFound || !sentDateStr) {
+        return { orgao, ano, mes, status: 'pending', sentDate: sentDateStr,
                  consultedAt: new Date().toISOString(), hasAnySent: false };
     }
 
-    // Linha encontrada: determinar se está no prazo ou atrasado
-    let status = 'on-time';
-    if (sentDateStr) {
-        // Prazo = último dia do mês + 30 dias
-        const lastDayOfMonth = new Date(parseInt(ano), parseInt(mes), 0);
-        const deadline = new Date(lastDayOfMonth.getFullYear(), lastDayOfMonth.getMonth(), lastDayOfMonth.getDate() + 30);
-        const [day, month, rest] = sentDateStr.split('/');
-        const sentDate = new Date(parseInt(rest.split(' ')[0]), parseInt(month) - 1, parseInt(day));
-        if (sentDate > deadline) status = 'late';
-    }
+    // Compara Data de Conclusão com o prazo (formula +30 dias do fim da competência)
+    const lastDayOfMonth = new Date(parseInt(ano), parseInt(mes), 0);
+    const deadline = new Date(lastDayOfMonth.getFullYear(), lastDayOfMonth.getMonth(), lastDayOfMonth.getDate() + 30);
+    const [day, month, rest] = sentDateStr.split('/');
+    const sentDate = new Date(parseInt(rest.split(' ')[0]), parseInt(month) - 1, parseInt(day));
+    const status = sentDate > deadline ? 'late' : 'on-time';
 
     return { orgao, ano, mes, status, sentDate: sentDateStr,
              consultedAt: new Date().toISOString(), hasAnySent: true };
