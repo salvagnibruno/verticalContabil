@@ -119,11 +119,12 @@ const CLIENTS_RAW = [
 
 const TEAM_INITIAL = [
     { name: "Bruno Ramos", birthday: "23/05", year: 1995, isSupervisor: true, email: "bruno.ramos@deltainf.com.br" },
-    { name: "Jade Zaira Clavé da Silveira Uchôa de Medeiros", birthday: "14/05", year: 2001 },
-    { name: "Marcus Sergio de Oliveira", birthday: "10/07", year: 1983 },
-    { name: "Luana de Matos Clee", birthday: "17/09", year: 1993 },
-    { name: "Gioliani Godois", birthday: "07/12", year: 1981 },
-    { name: "Hugo Munareto", birthday: "24/08", year: 1977 }
+    { name: "Jade Zaira Clavé da Silveira Uchôa de Medeiros", birthday: "14/05", year: 2001, email: "jade.medeiros@deltainf.com.br" },
+    { name: "Marcus Sergio de Oliveira", birthday: "10/07", year: 1983, email: "marcus.oliveira@deltainf.com.br" },
+    { name: "Luana de Matos Clee", birthday: "17/09", year: 1993, email: "luana.clee@deltainf.com.br" },
+    { name: "Gioliani Godois", birthday: "07/12", year: 1981, email: "gioliani.godois@deltainf.com.br" },
+    { name: "Hugo Munareto", birthday: "24/08", year: 1977, email: "hugo@deltainf.com.br" },
+    { name: "Nicole Fassbinder Chaves", birthday: "", year: null, email: "nicole.chaves@deltainf.com.br" }
 ];
 
 // ============================================================
