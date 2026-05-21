@@ -254,9 +254,8 @@ async function pushLegaisToServer(clients) {
 }
 
 // Aplica o mapa do servidor SEM substituir objetos — só atualiza os 3 campos.
-// IMPORTANTE: usado APENAS em sync manual (botão "Atualizar do servidor"),
-// nunca no init() automático — evita corromper o state.clients antes da
-// consulta PAD com snapshot velho do KV.
+// Apenas entregasLegais, entregasLegaisStart e entregasLegaisEnd são tocados;
+// ibge, contractStart/End, nome e tipo permanecem intactos.
 function applyLegaisFromServer(legaisMap) {
     if (!legaisMap || typeof legaisMap !== 'object') return;
     state.clients.forEach(c => {
@@ -268,6 +267,22 @@ function applyLegaisFromServer(legaisMap) {
             c.entregasLegaisEnd = data.entregasLegaisEnd || '';
         }
     });
+}
+
+// Sincronização automática e silenciosa — chamada no init() para garantir que
+// todos os colaboradores enxerguem as mesmas marcações de Entregas Legais.
+// Não exibe diálogos, não bloqueia o fluxo; falhas são ignoradas silenciosamente.
+async function autoSyncLegaisFromServer() {
+    try {
+        const legaisMap = await fetchLegaisFromServer();
+        if (!legaisMap) return;
+        const count = Object.keys(legaisMap).filter(k => legaisMap[k].entregasLegais).length;
+        if (count === 0) return;
+        applyLegaisFromServer(legaisMap);
+        localStorage.setItem('delta_v2_clients', JSON.stringify(state.clients));
+    } catch (e) {
+        // Silencioso — não interrompe o login se o servidor estiver indisponível
+    }
 }
 
 // Botão "Atualizar do servidor" — sincronização manual e controlada
@@ -566,11 +581,9 @@ async function init() {
     // ── Sincronizar usuários do servidor ─────────────────────
     await fetchUsersFromServer();
 
-    // NOTA: o auto-fetch de Entregas Legais foi REMOVIDO desta inicialização
-    // para garantir que a consulta PAD use exclusivamente o state.clients local
-    // (que tem ibge + flags atualizados via localStorage). A sincronização com
-    // o servidor agora é EXPLÍCITA, via botão "Atualizar do servidor" em
-    // Gestão de Clientes — controlada pelo admin, nunca automática no boot.
+    // Entregas Legais são sincronizadas silenciosamente no boot (ver autoSyncLegaisFromServer).
+    // O await acontece logo antes de refreshModuleData, garantindo que o filtro
+    // "Entregas Legais" já tenha os dados corretos quando a consulta PAD iniciar.
 
     // ── Migração one-shot: enviar usuários antigos do localStorage para o servidor ──
     // (executa apenas uma vez por browser, para não perder contas criadas antes do servidor)
@@ -620,6 +633,9 @@ async function init() {
     applyRoleRestrictions();
     setupFilters();
     setupEventListeners();
+    // Sincroniza marcações de Entregas Legais do servidor antes de consultar o PAD,
+    // garantindo que colaboradores enxerguem os mesmos clientes que o admin marcou.
+    await autoSyncLegaisFromServer();
     refreshModuleData();
     renderTeam();
     renderCalendar();
