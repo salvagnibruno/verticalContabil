@@ -1596,14 +1596,27 @@ async function refreshPADfromServer(reqId) {
         const chunk = activeClients.slice(i, i + chunkSize);
         
         await Promise.all(chunk.map(async (c) => {
+            const url = `${SERVER_URL}/api/pad-status?orgao=${c.code}&ano=${state.selectedYear}&mes=${state.selectedMonth+1}`;
+            let clientData = null;
+            let lastErr = null;
+            // 2 tentativas: 1ª com 15s, 2ª com 25s (TCE-RS pode ser lento ocasionalmente)
+            for (const timeout of [15000, 25000]) {
+                try {
+                    const response = await fetchWithTimeout(url, {}, timeout);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    clientData = await response.json();
+                    break;
+                } catch (err) {
+                    lastErr = err;
+                    if (reqId !== state.currentRequestId) return;
+                }
+            }
             try {
-                const response = await fetchWithTimeout(`${SERVER_URL}/api/pad-status?orgao=${c.code}&ano=${state.selectedYear}&mes=${state.selectedMonth+1}`, {}, 15000);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                const clientData = await response.json();
-                
+                if (!clientData) throw lastErr || new Error('fetch failed');
+
                 // V8 Race Protection: Check if this request is still the latest
                 if (reqId !== state.currentRequestId) return;
-                
+
                 state.clientStatuses[c.code] = clientData.status;
 
                 if (clientData.status === 'late') {
@@ -1727,30 +1740,11 @@ function refreshSimulated() {
 }
 
 function getSimulatedStatus(code, deadline, today) {
-    // Dados reais conhecidos — usados como simulação quando servidor indisponível
-    if (state.selectedYear === 2026 && state.selectedMonth === 1) {
-        // Fevereiro/2026: 106 no prazo, 3 atrasados, 1 não enviado
-        if (code === '45700') return 'pending'; // PM Constantina
-        if (['41201','88021','88050'].includes(code)) return 'late';
-        return 'on-time';
-    }
-    if (state.selectedYear === 2026 && state.selectedMonth === 2) {
-        // Março/2026: 108 no prazo, 1 atrasado, 1 não enviado (PM Constantina)
-        if (code === '45700') return 'pending'; // PM Constantina
-        if (code === '41201') return 'late';    // único atrasado em março
-        return 'on-time';
-    }
-    if (state.selectedYear === 2026 && state.selectedMonth === 3) {
-        // Abril/2026: 10 no prazo (prazo ainda não vencido), ~100 pendentes
-        // Usa hash determinístico: ~9% = on-time para refletir os 10 enviados
-        const seed = seededHash(code + '3' + '2026');
-        return (seed > 0.91) ? 'on-time' : 'pending';
-    }
-    // Meses futuros sem dados conhecidos
-    if (deadline > today) return 'pending';
-    // Meses passados: hash determinístico
-    const seed = seededHash(code + state.selectedMonth + state.selectedYear);
-    return (seed > 0.35) ? 'on-time' : (seed > 0.12) ? 'late' : 'pending';
+    // Sem servidor disponível ou falha individual: não temos como saber o status
+    // real. Retornar 'pending' (honesto) em vez de chutar com dados defasados.
+    // Os hardcoded antigos (Jan/Fev/Mar/Abr 2026) ficaram errados após as PMs
+    // continuarem enviando ao longo do tempo, então foram removidos.
+    return 'pending';
 }
 
 let isAnimating = false;

@@ -306,15 +306,34 @@ const cache = {};
 
 const TCE_BASE = 'https://portal.tce.rs.gov.br';
 
-// Busca HTML do TCE-RS — sem sessão (portal público, não requer autenticação)
+// Busca HTML do TCE-RS — sem sessão (portal público, não requer autenticação).
+// O portal pode ser lento ou intermitente sob carga; usamos 3 tentativas com
+// timeouts crescentes (15s, 25s, 35s) e headers de browser real para evitar
+// filtros agressivos do balanceador.
+const TCERS_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1'
+};
+
 async function fetchTCERS(orgao, ano) {
     const url = `${TCE_BASE}/pcdi2/relatorios-recibos-envio.action?cdOrgao=${orgao}&ano=${ano}`;
-    const response = await fetch(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-        timeout: 18000
-    });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.text();
+    // 2 tentativas (cabem no budget de 60s do Vercel mesmo no pior caso)
+    const timeouts = [15000, 28000];
+    let lastErr = null;
+    for (let i = 0; i < timeouts.length; i++) {
+        try {
+            const response = await fetch(url, { headers: TCERS_HEADERS, timeout: timeouts[i] });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            return await response.text();
+        } catch (err) {
+            lastErr = err;
+            if (i < timeouts.length - 1) await new Promise(r => setTimeout(r, 600));
+        }
+    }
+    throw lastErr || new Error('TCE-RS unreachable');
 }
 
 /**
