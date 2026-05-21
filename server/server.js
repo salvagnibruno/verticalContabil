@@ -423,11 +423,16 @@ app.post('/api/pad-status-batch', async (req, res) => {
 /**
  * Regras de classificação do PAD:
  *  - Linha do mês NÃO existe → pending
- *  - Linha do mês existe + sem "Data de Conclusão" → on-time (enviado, processando)
+ *  - Linha do mês existe + RVE presente + sem "Data de Conclusão" → on-time
+ *    (enviado, aguardando assinatura digital ou conclusão do processamento)
  *  - Linha do mês existe + data ≤ prazo → on-time
  *  - Linha do mês existe + data > prazo → late
  *
  * Prazo = último dia do mês de referência + 30 dias.
+ *
+ * Observação: "Pendente de assinatura" no TCE-RS significa que o município já
+ * enviou os dados e aguarda a assinatura eletrônica do gestor. Isso conta como
+ * enviado. Apenas a ausência completa da linha indica que não foi enviado.
  */
 function parsePadStatus(html, orgao, ano, mes) {
     const startIdx = html.indexOf('Sistema Informatizado de Auditoria e Prestação de Contas');
@@ -452,14 +457,22 @@ function parsePadStatus(html, orgao, ano, mes) {
     const rows = padSection.split(/<tr[^>]*>/i);
 
     let rowFound = false;
+    let rveStr = null;
     let sentDateStr = null;
 
     for (const row of rows) {
         if (!reMes.test(row)) continue;
         rowFound = true;
-        // Extrai "Data de Conclusão" (3ª coluna <td>, índice 3 após split)
         const cols = row.split(/<td[^>]*>/i);
+        if (cols.length >= 3) {
+            // col[2] = RVE (número identificador do envio)
+            const rveText = cols[2].split('</td>')[0].replace(/\s+/g, '');
+            if (/^\d{10,}$/.test(rveText)) {
+                rveStr = rveText;
+            }
+        }
         if (cols.length >= 4) {
+            // col[3] = "Data de Conclusão" — preenchida apenas quando processo está concluído
             const dateText = cols[3].split('</td>')[0].trim();
             if (dateText.match(/\d{2}\/\d{2}\/\d{4}/)) {
                 sentDateStr = dateText;
@@ -468,14 +481,19 @@ function parsePadStatus(html, orgao, ano, mes) {
         break; // uma linha por mês é suficiente
     }
 
-    // Nova regra: só conta como enviado se a linha do mês existe E tem Data de
-    // Conclusão preenchida. Linha sem Data de Conclusão = entrega em andamento → pending.
-    if (!rowFound || !sentDateStr) {
-        return { orgao, ano, mes, status: 'pending', sentDate: sentDateStr,
+    // Linha do mês não encontrada = município não enviou
+    if (!rowFound) {
+        return { orgao, ano, mes, status: 'pending', sentDate: null,
                  consultedAt: new Date().toISOString(), hasAnySent: false };
     }
 
-    // Compara Data de Conclusão com o prazo (formula +30 dias do fim da competência)
+    // Linha existe mas sem Data de Conclusão = enviado, aguardando assinatura/conclusão → on-time
+    if (!sentDateStr) {
+        return { orgao, ano, mes, status: 'on-time', sentDate: null,
+                 consultedAt: new Date().toISOString(), hasAnySent: true, rve: rveStr };
+    }
+
+    // Compara Data de Conclusão com o prazo (último dia do mês + 30 dias)
     const lastDayOfMonth = new Date(parseInt(ano), parseInt(mes), 0);
     const deadline = new Date(lastDayOfMonth.getFullYear(), lastDayOfMonth.getMonth(), lastDayOfMonth.getDate() + 30);
     const [day, month, rest] = sentDateStr.split('/');
@@ -483,7 +501,7 @@ function parsePadStatus(html, orgao, ano, mes) {
     const status = sentDate > deadline ? 'late' : 'on-time';
 
     return { orgao, ano, mes, status, sentDate: sentDateStr,
-             consultedAt: new Date().toISOString(), hasAnySent: true };
+             consultedAt: new Date().toISOString(), hasAnySent: true, rve: rveStr };
 }
 
 // Health check
