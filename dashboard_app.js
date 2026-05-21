@@ -1588,81 +1588,64 @@ async function refreshPADfromServer(reqId) {
     state.targetCounts = { onTime: 0, late: 0, pending: activeClients.length };
     startAnimationLoop();
 
-    const chunkSize = 5; // Limita concorrência para não sobrecarregar o TCE-RS
-    for (let i = 0; i < activeClients.length; i += chunkSize) {
-        // V7 Race Protection: Check if this request is still the latest
-        if (reqId !== state.currentRequestId) return;
+    // Uma única chamada batch — server faz fetch paralelo de todos os PMs.
+    // Muito mais confiável que 100+ requisições individuais (cada uma com
+    // potencial cold-start no Vercel).
+    try {
+        const orgaos = activeClients.map(c => c.code);
+        const batchUrl = `${SERVER_URL}/api/pad-status-batch`;
+        const response = await fetchWithTimeout(batchUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orgaos, ano: state.selectedYear, mes: state.selectedMonth + 1 })
+        }, 58000); // dentro do budget de 60s do Vercel
 
-        const chunk = activeClients.slice(i, i + chunkSize);
-        
-        await Promise.all(chunk.map(async (c) => {
-            const url = `${SERVER_URL}/api/pad-status?orgao=${c.code}&ano=${state.selectedYear}&mes=${state.selectedMonth+1}`;
-            let clientData = null;
-            let lastErr = null;
-            // 2 tentativas: 1ª com 15s, 2ª com 25s (TCE-RS pode ser lento ocasionalmente)
-            for (const timeout of [15000, 25000]) {
-                try {
-                    const response = await fetchWithTimeout(url, {}, timeout);
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    clientData = await response.json();
-                    break;
-                } catch (err) {
-                    lastErr = err;
-                    if (reqId !== state.currentRequestId) return;
+        if (reqId !== state.currentRequestId) return;
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const batchResult = await response.json();
+
+        // Aplica status para cada cliente
+        for (const c of activeClients) {
+            const r = batchResult[c.code];
+            const status = (r && r.status) ? r.status : 'pending';
+            state.clientStatuses[c.code] = status;
+
+            if (status === 'late') {
+                const notifyKey = `${c.code}_${state.selectedMonth}_${state.selectedYear}`;
+                const notified = JSON.parse(localStorage.getItem('delta_v2_notified_keys') || '[]');
+                if (!notified.includes(notifyKey)) {
+                    state.systemNotifs.push({
+                        code: c.code,
+                        month: state.selectedMonth,
+                        msg: `${c.type} ${c.name} enviou o PAD (Competência: ${MONTHS[state.selectedMonth]}) APÓS o prazo.`
+                    });
+                    state.unreadNotifsCount++;
+                    localStorage.setItem('delta_v2_sys_notifs', JSON.stringify(state.systemNotifs));
+                    localStorage.setItem('delta_v2_unread', state.unreadNotifsCount);
+                    updatePendingBadge();
+                    showBrowserNotification("Envio Atrasado", `${c.type} ${c.name} enviou o PAD de ${MONTHS[state.selectedMonth]} fora do prazo.`, "Bruno");
+                    notified.push(notifyKey);
+                    localStorage.setItem('delta_v2_notified_keys', JSON.stringify(notified));
                 }
             }
-            try {
-                if (!clientData) throw lastErr || new Error('fetch failed');
-
-                // V8 Race Protection: Check if this request is still the latest
-                if (reqId !== state.currentRequestId) return;
-
-                state.clientStatuses[c.code] = clientData.status;
-
-                if (clientData.status === 'late') {
-                    const notifyKey = `${c.code}_${state.selectedMonth}_${state.selectedYear}`;
-                    const notified = JSON.parse(localStorage.getItem('delta_v2_notified_keys') || '[]');
-                    
-                    if (!notified.includes(notifyKey)) {
-                        state.systemNotifs.push({ 
-                            code: c.code, 
-                            month: state.selectedMonth, 
-                            msg: `${c.type} ${c.name} enviou o PAD (Competência: ${MONTHS[state.selectedMonth]}) APÓS o prazo.` 
-                        });
-                        state.unreadNotifsCount++;
-                        localStorage.setItem('delta_v2_sys_notifs', JSON.stringify(state.systemNotifs));
-                        localStorage.setItem('delta_v2_unread', state.unreadNotifsCount);
-                        updatePendingBadge();
-                        
-                        // Notify ONLY the Supervisor
-                        showBrowserNotification("Envio Atrasado", `${c.type} ${c.name} enviou o PAD de ${MONTHS[state.selectedMonth]} fora do prazo.`, "Bruno");
-                        
-                        notified.push(notifyKey);
-                        localStorage.setItem('delta_v2_notified_keys', JSON.stringify(notified));
-                    }
-                }
-            } catch (err) {
-                state.clientStatuses[c.code] = getSimulatedStatus(c.code, deadline, today);
-            }
-        }));
-
-        // V8 Final check before updating counts to prevent module bleed
-        if (reqId !== state.currentRequestId) return;
-
-        let onTime = 0, late = 0, pendingCount = 0;
-        activeClients.forEach(c => {
-            const s = state.clientStatuses[c.code];
-            if (s === 'on-time') onTime++;
-            else if (s === 'late') late++;
-            else if (s === 'pending') pendingCount++;
-        });
-        
-        const totalRemaining = activeClients.length - Object.keys(state.clientStatuses).length;
-        state.targetCounts = { onTime, late, pending: pendingCount + totalRemaining };
-        startAnimationLoop();
-        
-        await new Promise(r => setTimeout(r, 80)); 
+        }
+    } catch (err) {
+        console.error('Erro na consulta batch PAD:', err.message);
+        // Sem resposta do server: marca todos como pending (honesto)
+        for (const c of activeClients) state.clientStatuses[c.code] = 'pending';
     }
+
+    if (reqId !== state.currentRequestId) return;
+
+    let onTime = 0, late = 0, pendingCount = 0;
+    activeClients.forEach(c => {
+        const s = state.clientStatuses[c.code];
+        if (s === 'on-time') onTime++;
+        else if (s === 'late') late++;
+        else pendingCount++;
+    });
+    state.targetCounts = { onTime, late, pending: pendingCount };
+    startAnimationLoop();
 
     if (statusEl) {
         statusEl.textContent = 'Sucesso ✅';

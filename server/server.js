@@ -353,9 +353,9 @@ app.get('/api/pad-status', async (req, res) => {
     }
 
     const cacheKey = `${orgao}_${ano}_${mes || 'all'}`;
-    /* if (cache[cacheKey]) {
+    if (cache[cacheKey]) {
         return res.json(cache[cacheKey]);
-    } */
+    }
 
     try {
         const html = await fetchTCERS(orgao, ano);
@@ -385,8 +385,10 @@ app.post('/api/pad-status-batch', async (req, res) => {
 
     const results = {};
 
-    // Processar em paralelo com limite de concorrência (máx 40 simultâneos)
-    const concurrency = 40;
+    // Alta concorrência para caber no budget de 60s do Vercel:
+    // 110 orgãos / 30 paralelos = 4 ondas; cada fetchTCERS típico = 1-3s.
+    // Cache hits são instantâneos. Worst case com retry: ~25s.
+    const concurrency = 30;
     const chunks = [];
     for (let i = 0; i < orgaos.length; i += concurrency) {
         chunks.push(orgaos.slice(i, i + concurrency));
@@ -403,13 +405,14 @@ app.post('/api/pad-status-batch', async (req, res) => {
             try {
                 const html = await fetchTCERS(orgao, ano);
                 const parsed = parsePadStatus(html, orgao, ano, mes ? parseInt(mes) : null);
-                
+
                 cache[cacheKey] = parsed;
                 setTimeout(() => delete cache[cacheKey], 30 * 60 * 1000);
-                
+
                 results[orgao] = parsed;
             } catch (err) {
-                results[orgao] = { orgao, status: 'pending' };
+                console.error(`[batch] falha ${orgao}:`, err.message);
+                results[orgao] = { orgao, status: 'pending', sentDate: null };
             }
         }));
     }
