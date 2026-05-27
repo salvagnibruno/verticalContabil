@@ -3392,6 +3392,25 @@ window.onClientsTypeFilterChange = function(value) {
     renderClientsMgmtTable();
 };
 
+// Chamado pelo onchange do checkbox de Entregas Legais.
+// Persiste todos os edits em curso no DOM em state.clients antes de re-renderizar,
+// para que o usuário não perca alterações não salvas nos outros campos.
+window.onToggleEntregasLegais = function(idx, checked) {
+    // Flush current DOM inputs into state.clients
+    document.querySelectorAll('#clients-mgmt-table input, #clients-mgmt-table select').forEach(input => {
+        const i = input.dataset.idx;
+        const field = input.dataset.field;
+        if (!i || !field || field === 'entregasLegais') return;
+        if (input.type === 'checkbox') {
+            state.clients[i][field] = input.checked;
+        } else {
+            state.clients[i][field] = input.value;
+        }
+    });
+    state.clients[idx].entregasLegais = checked;
+    renderClientsMgmtTable();
+};
+
 function renderClientsMgmtTable() {
     const tbody = document.querySelector('#clients-mgmt-table tbody');
     if (!tbody) return;
@@ -3415,43 +3434,55 @@ function renderClientsMgmtTable() {
         .sort((a, b) => (a.c.name || '').localeCompare(b.c.name || '', 'pt-BR', { sensitivity: 'base' }));
 
     rows.forEach(({ c, idx }) => {
-        const row = document.createElement('tr');
         const hasLegal = !!c.entregasLegais;
+
+        // Linha 1 (sempre visível): Cód. Órgão | Tipo | Nome Cliente | checkbox Ent. Legais
+        const row = document.createElement('tr');
         row.innerHTML = `
             <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="code" data-original="${c.code}" style="width:90px; font-weight:bold;"></td>
             <td><input type="text" value="${c.type}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
             <td><input type="text" value="${c.name}" data-idx="${idx}" data-field="name"></td>
+            <td style="text-align:center;">
+                <input type="checkbox" data-idx="${idx}" data-field="entregasLegais" ${hasLegal ? 'checked' : ''}
+                    onchange="onToggleEntregasLegais(${idx}, this.checked)">
+            </td>
         `;
         tbody.appendChild(row);
 
+        // Linha 2 (condicional): datas de Entregas Legais OU datas de Contrato Delta
         const dateRow = document.createElement('tr');
         dateRow.className = 'client-date-row';
-        dateRow.innerHTML = `
-            <td colspan="3">
-                <div class="client-date-fields">
-                    <label class="client-date-label">
-                        <span>Ent. Legais</span>
-                        <input type="checkbox" data-idx="${idx}" data-field="entregasLegais" ${hasLegal ? 'checked' : ''}>
-                    </label>
-                    <label class="client-date-label">
-                        <span>Início Entregas Legais</span>
-                        <input type="date" value="${c.entregasLegaisStart || ''}" data-idx="${idx}" data-field="entregasLegaisStart">
-                    </label>
-                    <label class="client-date-label">
-                        <span>Fim Entregas Legais</span>
-                        <input type="date" value="${c.entregasLegaisEnd || ''}" data-idx="${idx}" data-field="entregasLegaisEnd">
-                    </label>
-                    <label class="client-date-label">
-                        <span>Início Contrato Delta</span>
-                        <input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart">
-                    </label>
-                    <label class="client-date-label">
-                        <span>Fim Contrato Delta</span>
-                        <input type="date" value="${c.contractEnd || ''}" data-idx="${idx}" data-field="contractEnd">
-                    </label>
-                </div>
-            </td>
-        `;
+        if (hasLegal) {
+            dateRow.innerHTML = `
+                <td colspan="4">
+                    <div class="client-date-fields">
+                        <label class="client-date-label">
+                            <span>Início Entregas Legais</span>
+                            <input type="date" value="${c.entregasLegaisStart || ''}" data-idx="${idx}" data-field="entregasLegaisStart">
+                        </label>
+                        <label class="client-date-label">
+                            <span>Fim Entregas Legais</span>
+                            <input type="date" value="${c.entregasLegaisEnd || ''}" data-idx="${idx}" data-field="entregasLegaisEnd">
+                        </label>
+                    </div>
+                </td>
+            `;
+        } else {
+            dateRow.innerHTML = `
+                <td colspan="4">
+                    <div class="client-date-fields">
+                        <label class="client-date-label">
+                            <span>Início Contrato Delta</span>
+                            <input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart">
+                        </label>
+                        <label class="client-date-label">
+                            <span>Fim Contrato Delta</span>
+                            <input type="date" value="${c.contractEnd || ''}" data-idx="${idx}" data-field="contractEnd">
+                        </label>
+                    </div>
+                </td>
+            `;
+        }
         tbody.appendChild(dateRow);
     });
 }

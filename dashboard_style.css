@@ -699,6 +699,9 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 .client-date-label { display: flex; flex-direction: column; gap: 3px; min-width: 180px; flex: 1; }
 .client-date-label span { font-size: 0.72rem; font-weight: 600; color: #6b7a99; text-transform: uppercase; letter-spacing: 0.03em; }
 .client-date-label input[type="date"] { width: 100%; padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit; font-size: 0.8rem; }
+/* Checkbox Entregas Legais na linha principal */
+.clients-table td:nth-child(4) { width: 80px; text-align: center; vertical-align: middle; }
+.clients-table td:nth-child(4) input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: #005eb8; }
 .btn-group-actions { display: flex; gap: 10px; margin-top: 20px; }
 .btn-save { background: var(--success); color: #fff; font-weight: 700; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
 .btn-cancel { background: #6c757d; color: #fff; font-weight: 700; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
