@@ -3453,6 +3453,7 @@ function renderClientsMgmtTable() {
         const dateRow = document.createElement('tr');
         dateRow.className = 'client-date-row';
         if (hasLegal) {
+            // Com Entregas Legais: 4 campos
             dateRow.innerHTML = `
                 <td colspan="4">
                     <div class="client-date-fields">
@@ -3464,10 +3465,19 @@ function renderClientsMgmtTable() {
                             <span>Fim Entregas Legais</span>
                             <input type="date" value="${c.entregasLegaisEnd || ''}" data-idx="${idx}" data-field="entregasLegaisEnd">
                         </label>
+                        <label class="client-date-label">
+                            <span>Início Contrato Delta</span>
+                            <input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart">
+                        </label>
+                        <label class="client-date-label">
+                            <span>Fim Contrato Delta</span>
+                            <input type="date" value="${c.contractEnd || ''}" data-idx="${idx}" data-field="contractEnd">
+                        </label>
                     </div>
                 </td>
             `;
         } else {
+            // Sem Entregas Legais: apenas datas de contrato
             dateRow.innerHTML = `
                 <td colspan="4">
                     <div class="client-date-fields">
