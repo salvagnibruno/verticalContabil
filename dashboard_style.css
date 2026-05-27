@@ -698,13 +698,13 @@ input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-o
 /* Checkbox Entregas Legais */
 .clients-table td:nth-child(4) { width: 70px; text-align: center; vertical-align: middle; }
 .clients-table td:nth-child(4) input[type="checkbox"] { width: 18px; height: 18px; cursor: pointer; accent-color: #005eb8; }
-/* Zebrado — pares de linhas por cliente */
+/* Zebrado — pares de linhas por cliente (as duas linhas de cada cliente usam o mesmo tom) */
 .client-row-even td { background: #ffffff; }
-.client-row-odd  td { background: #f0f4fb; }
-/* Linha de datas */
-.client-date-row td { background: #f4f8ff; padding: 6px 10px 10px; border-top: none; }
-.client-row-even.client-date-row td { background: #f4f8ff; }
-.client-row-odd.client-date-row  td { background: #e6edf8; }
+.client-row-odd  td { background: #dde9f7; }
+/* Linha de datas: só padding/borda; cor vem do zebrado */
+.client-date-row td { padding: 6px 10px 10px; border-top: none; }
+.client-row-even.client-date-row td { background: #edf3ff; }
+.client-row-odd.client-date-row  td { background: #cfe0f5; }
 .client-date-fields { display: flex; gap: 16px; }
 .client-date-fields--contract { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #d0daea; }
 .client-date-label { display: flex; flex-direction: column; gap: 2px; flex: 1; }

@@ -469,7 +469,8 @@ window.onFilterViewChange = function(which, checked) {
         }
     }
     applyLegaisFilter();
-    refreshModuleData();
+    // Força re-consulta ignorando cache: o filtro mudou e o cacheKey não inclui filtro
+    refreshModuleData(false, true);
 };
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
