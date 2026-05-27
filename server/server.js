@@ -426,6 +426,158 @@ app.post('/api/pad-status-batch', async (req, res) => {
     res.json(results);
 });
 
+// ─────────────────────────────────────────────────────────────────
+// SIOPE — Batch status via FNDE (uma requisição por bimestre/ano)
+// ─────────────────────────────────────────────────────────────────
+const siopeCache = {};
+
+app.post('/api/siope-status-batch', async (req, res) => {
+    const { ibges, bimestre, ano } = req.body;
+    if (!ibges || !Array.isArray(ibges) || ibges.length === 0 || !bimestre || !ano) {
+        return res.status(400).json({ error: 'ibges[], bimestre e ano são obrigatórios.' });
+    }
+
+    const bimNum = parseInt(bimestre);
+    const anoNum  = parseInt(ano);
+
+    // Prazo: último dia do último mês do bimestre + 30 dias
+    // Bimestre (1-6) → índice do mês final (0-based):
+    //   1→Jan-Fev → Fev(1)  2→Mar-Abr → Abr(3)  3→Mai-Jun → Jun(5)
+    //   4→Jul-Ago → Ago(7)  5→Set-Out → Out(9)   6→Nov-Dez → Dez(11)
+    const endMonthIdx = [null, 1, 3, 5, 7, 9, 11][bimNum];
+    if (endMonthIdx === undefined) {
+        return res.status(400).json({ error: `Bimestre inválido: ${bimestre}` });
+    }
+    const bimEndDate = new Date(anoNum, endMonthIdx + 1, 0); // último dia do mês final
+    const deadline   = new Date(anoNum, bimEndDate.getMonth(), bimEndDate.getDate() + 30);
+
+    const cacheKey = `siope_${anoNum}_${bimNum}`;
+
+    if (!siopeCache[cacheKey]) {
+        // Uma única requisição ao FNDE para o estado RS (cod_uf_mun=43),
+        // filtrando por ano e bimestre — retorna todos os municípios que enviaram.
+        const url = `https://www.fnde.gov.br/siope/recibosTransmissao.do` +
+                    `?tipoDeRecibo=1&cod_uf_mun=43` +
+                    `&anoExercicio=${anoNum}&periodoApuracao=${bimNum}&consultar=Consultar`;
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    'User-Agent':      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0',
+                    'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'pt-BR,pt;q=0.9,en;q=0.8',
+                    'Referer':         'https://www.fnde.gov.br/siope/recibosTransmissao.do',
+                },
+                timeout: 25000
+            });
+            if (!response.ok) throw new Error(`FNDE HTTP ${response.status}`);
+            const html = await response.text();
+            siopeCache[cacheKey] = parseSiopeHtml(html, deadline);
+            // Cache por 20 minutos
+            setTimeout(() => delete siopeCache[cacheKey], 20 * 60 * 1000);
+        } catch (err) {
+            console.error('[SIOPE] FNDE fetch falhou:', err.message);
+            return res.status(500).json({ error: `FNDE indisponível: ${err.message}` });
+        }
+    }
+
+    const parsedAll = siopeCache[cacheKey];
+    const result = {};
+    for (const ibge of ibges) {
+        const key = String(ibge);
+        let entry = parsedAll[key];
+        // Se não encontrou direto, tenta variações de formatação entre 6 e 7 dígitos.
+        // Padrão RS: o FNDE pode mostrar 7 dígitos enquanto o app armazena 6 dígitos.
+        // Dois padrões observados:
+        //   A) 430064 → inserir '0' na pos 3 → 4300064  (ex: Ametista do Sul)
+        //   B) 430175 → inserir '0' no final → 4301750  (ex: Barão do Triunfo)
+        if (!entry && key.length === 6) {
+            entry = parsedAll[key.slice(0, 3) + '0' + key.slice(3)]  // padrão A
+                 || parsedAll[key + '0'];                              // padrão B
+        }
+        // Inverso: chave tem 7 dígitos, FNDE retornou 6
+        if (!entry && key.length === 7) {
+            entry = parsedAll[key.slice(0, 3) + key.slice(4)]         // remove pos 3
+                 || parsedAll[key.slice(0, 6)];                        // remove último
+        }
+        result[key] = entry || { status: 'pending' };
+    }
+    res.json(result);
+});
+
+/**
+ * Extrai do HTML da página FNDE todos os registros de transmissão SIOPE.
+ * Retorna mapa { [ibgeCode]: { status: 'on-time'|'late', sentDate } }.
+ *
+ * O FNDE pode apresentar dois formatos de linha:
+ *   A) células separadas: [IBGE] [Município] [...] [DD/MM/YYYY HH:MM:SS]
+ *   B) campos combinados na mesma célula (ex.: "4300034 - Aceguá / 1º Bimestre / 2026")
+ *
+ * Estratégia: varre cada <tr>, extrai texto puro de cada <td>,
+ * identifica célula/texto com código IBGE de 6 ou 7 dígitos iniciando com "43"
+ * e célula com data DD/MM/AAAA.
+ */
+function parseSiopeHtml(html, deadline) {
+    const found = {};
+
+    const trRegex = /<tr[\s\S]*?<\/tr>/gi;
+    let trMatch;
+    while ((trMatch = trRegex.exec(html)) !== null) {
+        const rowHtml = trMatch[0];
+
+        // Extrai texto limpo de cada <td>
+        const cells = [];
+        const tdRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
+        let tdMatch;
+        while ((tdMatch = tdRegex.exec(rowHtml)) !== null) {
+            const text = tdMatch[1]
+                .replace(/<[^>]+>/g, ' ')
+                .replace(/&nbsp;/gi, ' ')
+                .replace(/&amp;/gi, '&')
+                .replace(/\s+/g, ' ')
+                .trim();
+            cells.push(text);
+        }
+        if (cells.length < 2) continue;
+
+        let ibgeCode = null;
+        let sentDateStr = null;
+
+        for (const cell of cells) {
+            // Célula inteiramente = código IBGE RS (6 ou 7 dígitos iniciando com 43)
+            if (!ibgeCode && /^43\d{4,5}$/.test(cell)) {
+                ibgeCode = cell;
+                continue;
+            }
+            // IBGE embutido no texto: "4300034 - Município" ou "IBGE: 430064"
+            if (!ibgeCode) {
+                const m = cell.match(/\b(43\d{4,5})\b/);
+                if (m) ibgeCode = m[1];
+            }
+            // Data DD/MM/AAAA (com ou sem horário HH:MM:SS)
+            if (!sentDateStr) {
+                const dm = cell.match(/\b(\d{2}\/\d{2}\/\d{4})\b/);
+                if (dm) sentDateStr = dm[1];
+            }
+        }
+
+        if (!ibgeCode) continue;
+        if (found[ibgeCode]) continue; // mantém a primeira ocorrência
+
+        let status = 'on-time'; // se consta no FNDE, foi enviado
+        if (sentDateStr) {
+            const dm = sentDateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+            if (dm) {
+                const sentDate = new Date(parseInt(dm[3]), parseInt(dm[2]) - 1, parseInt(dm[1]));
+                status = sentDate > deadline ? 'late' : 'on-time';
+            }
+        }
+
+        found[ibgeCode] = { status, sentDate: sentDateStr || null };
+    }
+
+    return found;
+}
+
 /**
  * Regras de classificação do PAD:
  *  - Linha do mês NÃO existe → pending
