@@ -1391,7 +1391,7 @@ async function refreshModuleData(isAuto = false, isForce = false) {
     if (isAuto && (nowTs - state.lastRefresh < state.refreshInterval)) return;
     
     // Reset visual state for clean transition if not auto-refresh
-    if (!isAuto) {
+    if (!isAuto && state.module !== 'PAD') {
         state.targetCounts = { onTime: 0, late: 0, pending: 0 };
         state.currentCounts = { onTime: 0, late: 0, pending: 0 };
         updateCountsAndChart(0, 0, 0, true);
@@ -3421,19 +3421,38 @@ function renderClientsMgmtTable() {
             <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="code" data-original="${c.code}" style="width:90px; font-weight:bold;"></td>
             <td><input type="text" value="${c.type}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
             <td><input type="text" value="${c.name}" data-idx="${idx}" data-field="name"></td>
-            <td style="text-align:center;">
-                <input type="checkbox" data-idx="${idx}" data-field="entregasLegais" ${hasLegal ? 'checked' : ''}>
-            </td>
-            <td>
-                <input type="date" value="${c.entregasLegaisStart || ''}" data-idx="${idx}" data-field="entregasLegaisStart">
-            </td>
-            <td>
-                <input type="date" value="${c.entregasLegaisEnd || ''}" data-idx="${idx}" data-field="entregasLegaisEnd">
-            </td>
-            <td><input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart"></td>
-            <td><input type="date" value="${c.contractEnd || ''}" data-idx="${idx}" data-field="contractEnd"></td>
         `;
         tbody.appendChild(row);
+
+        const dateRow = document.createElement('tr');
+        dateRow.className = 'client-date-row';
+        dateRow.innerHTML = `
+            <td colspan="3">
+                <div class="client-date-fields">
+                    <label class="client-date-label">
+                        <span>Ent. Legais</span>
+                        <input type="checkbox" data-idx="${idx}" data-field="entregasLegais" ${hasLegal ? 'checked' : ''}>
+                    </label>
+                    <label class="client-date-label">
+                        <span>Início Entregas Legais</span>
+                        <input type="date" value="${c.entregasLegaisStart || ''}" data-idx="${idx}" data-field="entregasLegaisStart">
+                    </label>
+                    <label class="client-date-label">
+                        <span>Fim Entregas Legais</span>
+                        <input type="date" value="${c.entregasLegaisEnd || ''}" data-idx="${idx}" data-field="entregasLegaisEnd">
+                    </label>
+                    <label class="client-date-label">
+                        <span>Início Contrato Delta</span>
+                        <input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart">
+                    </label>
+                    <label class="client-date-label">
+                        <span>Fim Contrato Delta</span>
+                        <input type="date" value="${c.contractEnd || ''}" data-idx="${idx}" data-field="contractEnd">
+                    </label>
+                </div>
+            </td>
+        `;
+        tbody.appendChild(dateRow);
     });
 }
 
