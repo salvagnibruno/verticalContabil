@@ -403,7 +403,13 @@ app.post('/api/pad-status-batch', async (req, res) => {
             }
 
             try {
-                const html = await fetchTCERS(orgao, ano);
+                // Batch usa 1 tentativa de 10s (sem retry).
+                // Com 30 paralelos e 4 ondas, o pior caso é 40s — dentro dos 60s do Vercel.
+                // O fetchTCERS padrão (2 tentativas de 15s+28s) estourava o limite.
+                const url = `${TCE_BASE}/pcdi2/relatorios-recibos-envio.action?cdOrgao=${orgao}&ano=${ano}`;
+                const response = await fetch(url, { headers: TCERS_HEADERS, timeout: 10000 });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const html = await response.text();
                 const parsed = parsePadStatus(html, orgao, ano, mes ? parseInt(mes) : null);
 
                 cache[cacheKey] = parsed;

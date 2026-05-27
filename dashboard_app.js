@@ -1581,6 +1581,15 @@ async function refreshPADfromServer(reqId) {
     const deadline = new Date(lastDay.getFullYear(), lastDay.getMonth(), lastDay.getDate() + 30);
     const today = new Date();
 
+    // Calcula clientes ativos e exibe "N pendentes" ANTES de checkServer().
+    // checkServer() pode demorar 15-20s no cold start matinal do Vercel;
+    // sem isso, a UI fica zerada durante toda a espera.
+    const activeClients = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear) && applyLegaisClientFilter(c));
+    if (reqId === state.currentRequestId) {
+        state.targetCounts = { onTime: 0, late: 0, pending: activeClients.length };
+        startAnimationLoop();
+    }
+
     const hasServer = await checkServer();
     if (!hasServer) {
         el.deadlineInfo.innerHTML += ` <span style="color:#e67e22; font-size:0.8rem;">⚠️ Servidor offline</span>`;
@@ -1591,15 +1600,12 @@ async function refreshPADfromServer(reqId) {
     const statusEl = document.getElementById('loading-status');
     if (statusEl) {
         statusEl.textContent = 'Aguarde...';
-        statusEl.style.display = 'block'; // Ensure visibility
+        statusEl.style.display = 'block';
         statusEl.className = 'status-msg status-loading';
     }
 
     state.clientStatuses = {};
-    
-    // Filter by Contract End Date (Only if end date is set)
-    const activeClients = state.clients.filter(c => isClientActive(c, state.selectedMonth, state.selectedYear) && applyLegaisClientFilter(c));
-    
+
     // Ensure animation loop is running toward the new total
     state.targetCounts = { onTime: 0, late: 0, pending: activeClients.length };
     startAnimationLoop();
@@ -3453,7 +3459,7 @@ function renderClientsMgmtTable() {
         const dateRow = document.createElement('tr');
         dateRow.className = 'client-date-row';
         if (hasLegal) {
-            // Com Entregas Legais: 4 campos
+            // Com Entregas Legais: linha de EL + linha de contrato separadas
             dateRow.innerHTML = `
                 <td colspan="4">
                     <div class="client-date-fields">
@@ -3465,6 +3471,8 @@ function renderClientsMgmtTable() {
                             <span>Fim Entregas Legais</span>
                             <input type="date" value="${c.entregasLegaisEnd || ''}" data-idx="${idx}" data-field="entregasLegaisEnd">
                         </label>
+                    </div>
+                    <div class="client-date-fields client-date-fields--contract">
                         <label class="client-date-label">
                             <span>Início Contrato Delta</span>
                             <input type="date" value="${c.contractStart || ''}" data-idx="${idx}" data-field="contractStart">
