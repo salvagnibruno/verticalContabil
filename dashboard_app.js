@@ -1698,14 +1698,15 @@ function isClientActive(client, month, year) {
 // Cliente está com "Entregas Legais ativas hoje"?
 function isClientLegaisActive(c) {
     if (!c.entregasLegais) return false;
-    const today = new Date();
-    if (c.entregasLegaisStart) {
+    // Flag marcada sem datas = contrato vigente (sem restrição de período)
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (c.entregasLegaisStart && String(c.entregasLegaisStart).length >= 8) {
         const start = new Date(c.entregasLegaisStart);
-        if (today < start) return false;
+        if (!isNaN(start) && today < start) return false;
     }
-    if (c.entregasLegaisEnd) {
+    if (c.entregasLegaisEnd && String(c.entregasLegaisEnd).length >= 8) {
         const end = new Date(c.entregasLegaisEnd);
-        if (today > end) return false;
+        if (!isNaN(end) && today > end) return false;
     }
     return true;
 }
@@ -3439,11 +3440,13 @@ function renderClientsMgmtTable() {
         .filter(({ c }) => _clientsTypeFilter === 'ALL' || c.type === _clientsTypeFilter)
         .sort((a, b) => (a.c.name || '').localeCompare(b.c.name || '', 'pt-BR', { sensitivity: 'base' }));
 
-    rows.forEach(({ c, idx }) => {
+    rows.forEach(({ c, idx }, rowIdx) => {
         const hasLegal = !!c.entregasLegais;
+        const stripeClass = rowIdx % 2 === 0 ? 'client-row-even' : 'client-row-odd';
 
         // Linha 1 (sempre visível): Cód. Órgão | Tipo | Nome Cliente | checkbox Ent. Legais
         const row = document.createElement('tr');
+        row.className = stripeClass;
         row.innerHTML = `
             <td><input type="text" value="${c.code}" data-idx="${idx}" data-field="code" data-original="${c.code}" style="width:90px; font-weight:bold;"></td>
             <td><input type="text" value="${c.type}" data-idx="${idx}" data-field="type" style="width:60px;"></td>
@@ -3457,7 +3460,7 @@ function renderClientsMgmtTable() {
 
         // Linha 2 (condicional): datas de Entregas Legais OU datas de Contrato Delta
         const dateRow = document.createElement('tr');
-        dateRow.className = 'client-date-row';
+        dateRow.className = `client-date-row ${stripeClass}`;
         if (hasLegal) {
             // Com Entregas Legais: linha de EL + linha de contrato separadas
             dateRow.innerHTML = `
